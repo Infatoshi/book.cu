@@ -1,0 +1,22 @@
+# Compiled binaries
+pipeline
+
+# Build artifacts
+*.o
+*.a
+*.so
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Profiling outputs
+*.qdrep
+*.nsys-rep
+*.sqlite
+
+# Results
+benchmark_results.txt
