@@ -1,62 +1,91 @@
 
 
+/**
+ * CUTLASS Single-GPU GEMM Implementation
+ * Demonstrates high-performance matrix multiplication using NVIDIA's CUTLASS library
+ * Optimized for Hopper architecture (SM90) with FP16 precision and Tensor Cores
+ * 
+ * This implementation showcases:
+ * - Modern CUTLASS API with CuTe tensor abstractions
+ * - Automatic kernel scheduling and optimization
+ * - FP16 input/output with FP32 accumulation for numerical stability
+ * - Comprehensive verification and benchmarking
+ */
+
 using namespace cute;
 
-using ArchTag = cutlass::arch::Sm90;
-using ElementInput = cutlass::half_t;
-using ElementOutput = cutlass::half_t;
-using ElementAccumulator = float;
-using ElementC = ElementOutput;
-using ElementD = ElementOutput;
-using LayoutA = cutlass::layout::RowMajor;
-using LayoutB = cutlass::layout::RowMajor;
-using LayoutC = cutlass::layout::RowMajor;
-using LayoutD = cutlass::layout::RowMajor;
-using TileShape = Shape<_128, _256, _64>;
-using ClusterShape = Shape<_2, _1, _1>;
-using KernelSchedule = cutlass::gemm::collective::KernelScheduleAuto;
+// Architecture and data type configuration
+using ArchTag = cutlass::arch::Sm90;           // Hopper architecture (H100, RTX 4090, etc.)
+using ElementInput = cutlass::half_t;          // FP16 input data type
+using ElementOutput = cutlass::half_t;         // FP16 output data type
+using ElementAccumulator = float;              // FP32 accumulation for numerical stability
+using ElementC = ElementOutput;                // C matrix element type
+using ElementD = ElementOutput;                // D matrix element type
 
-static constexpr int AlignmentA = 16 / sizeof(ElementInput);
-static constexpr int AlignmentB = 16 / sizeof(ElementInput);
-static constexpr int AlignmentC = 16 / sizeof(ElementOutput);
-static constexpr int AlignmentD = 16 / sizeof(ElementOutput);
+// Memory layout configuration (row-major for all matrices)
+using LayoutA = cutlass::layout::RowMajor;     // A matrix layout
+using LayoutB = cutlass::layout::RowMajor;     // B matrix layout
+using LayoutC = cutlass::layout::RowMajor;     // C matrix layout
+using LayoutD = cutlass::layout::RowMajor;     // D matrix layout
 
+// Tile configuration for optimal performance
+using TileShape = Shape<_128, _256, _64>;      // Thread block tile: 128×256×64
+using ClusterShape = Shape<_2, _1, _1>;        // Cluster shape for multi-GPU coordination
+using KernelSchedule = cutlass::gemm::collective::KernelScheduleAuto; // Automatic scheduling
+
+// Memory alignment requirements for optimal performance
+static constexpr int AlignmentA = 16 / sizeof(ElementInput);  // A matrix alignment
+static constexpr int AlignmentB = 16 / sizeof(ElementInput);  // B matrix alignment
+static constexpr int AlignmentC = 16 / sizeof(ElementOutput);  // C matrix alignment
+static constexpr int AlignmentD = 16 / sizeof(ElementOutput);  // D matrix alignment
+
+// Compute type for epilogue operations
 using ElementCompute = float;
 
+// Epilogue operation: D = alpha * C + beta * D (where alpha=1, beta=0 for simple copy)
 using EpilogueOp = cutlass::epilogue::fusion::LinearCombination<
     ElementOutput, ElementCompute, ElementOutput, ElementCompute,
     cutlass::FloatRoundStyle::round_to_nearest>;
 
+// Collective epilogue: handles output processing and memory writes
 using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-    ArchTag, cutlass::arch::OpClassTensorOp,
-    TileShape, ClusterShape,
-    cutlass::epilogue::collective::EpilogueTileAuto,
-    ElementAccumulator, ElementCompute,
-    ElementC, LayoutC, AlignmentC,
-    ElementD, LayoutD, AlignmentD,
-    cutlass::epilogue::collective::EpilogueScheduleAuto,
-    EpilogueOp
+    ArchTag, cutlass::arch::OpClassTensorOp,     // Architecture and operation class
+    TileShape, ClusterShape,                      // Tile and cluster shapes
+    cutlass::epilogue::collective::EpilogueTileAuto, // Automatic epilogue tiling
+    ElementAccumulator, ElementCompute,          // Accumulator and compute types
+    ElementC, LayoutC, AlignmentC,               // C matrix configuration
+    ElementD, LayoutD, AlignmentD,               // D matrix configuration
+    cutlass::epilogue::collective::EpilogueScheduleAuto, // Automatic scheduling
+    EpilogueOp                                   // Epilogue operation
 >::CollectiveOp;
 
+// Collective mainloop: handles the core GEMM computation
 using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
-    ArchTag, cutlass::arch::OpClassTensorOp,
-    ElementInput, LayoutA, AlignmentA,
-    ElementInput, LayoutB, AlignmentB,
-    ElementAccumulator,
-    TileShape, ClusterShape,
+    ArchTag, cutlass::arch::OpClassTensorOp,     // Architecture and operation class
+    ElementInput, LayoutA, AlignmentA,           // A matrix configuration
+    ElementInput, LayoutB, AlignmentB,           // B matrix configuration
+    ElementAccumulator,                          // Accumulator type
+    TileShape, ClusterShape,                      // Tile and cluster shapes
     cutlass::gemm::collective::StageCountAutoCarveout<
-        static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>,
-    KernelSchedule
+        static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>, // Shared memory management
+    KernelSchedule                               // Kernel scheduling strategy
 >::CollectiveOp;
 
+// GEMM kernel: combines mainloop and epilogue
 using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-    Shape<int, int, int>,
-    CollectiveMainloop,
-    CollectiveEpilogue
+    Shape<int, int, int>,                        // Problem shape type
+    CollectiveMainloop,                          // Main computation loop
+    CollectiveEpilogue                           // Output processing
 >;
 
+// GEMM device adapter: high-level interface to the kernel
 using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
+/**
+ * CUDA error checking macro
+ * @param call CUDA function call to check
+ */
+#define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
         if (err != cudaSuccess) { \
@@ -66,65 +95,106 @@ using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
         } \
     } while(0)
 
+/**
+ * Convert CUTLASS data types to float for computation
+ * @param val Value to convert
+ * @return Float representation
+ */
 template<typename T>
 float to_float(T val) {
     if constexpr (std::is_same_v<T, cutlass::half_t>) {
-        return float(val);
+        return float(val);  // Convert FP16 to FP32
     } else if constexpr (std::is_same_v<T, cutlass::float_e4m3_t>) {
-        return float(val);
+        return float(val);  // Convert FP8 to FP32
     } else {
-        return static_cast<float>(val);
+        return static_cast<float>(val);  // Generic conversion
     }
 }
 
+/**
+ * Convert float to CUTLASS data types
+ * @param val Float value to convert
+ * @return Converted value
+ */
 template<typename T>
 T from_float(float val) {
     if constexpr (std::is_same_v<T, cutlass::half_t>) {
-        return cutlass::half_t(val);
+        return cutlass::half_t(val);  // Convert FP32 to FP16
     } else if constexpr (std::is_same_v<T, cutlass::float_e4m3_t>) {
-        return cutlass::float_e4m3_t(val);
+        return cutlass::float_e4m3_t(val);  // Convert FP32 to FP8
     } else {
-        return static_cast<T>(val);
+        return static_cast<T>(val);  // Generic conversion
     }
 }
 
+/**
+ * CPU reference implementation of GEMM for verification
+ * Computes C = A * B where A is M×K, B is K×N, C is M×N
+ * 
+ * @param A Input matrix A (M×K, row-major)
+ * @param B Input matrix B (K×N, row-major)
+ * @param C Output matrix C (M×N, row-major)
+ * @param M Number of rows in A and C
+ * @param N Number of columns in B and C
+ * @param K Number of columns in A and rows in B
+ */
 template<typename InType, typename OutType>
 void cpu_gemm(const std::vector<InType>& A, const std::vector<InType>& B,
               std::vector<OutType>& C, int M, int N, int K) {
+    // Standard triple-nested loop GEMM implementation
     for (int i = 0; i < M; i++) {
         for (int j = 0; j < N; j++) {
             float sum = 0.0f;
+            // Compute dot product of row A[i,:] and column B[:,j]
             for (int k = 0; k < K; k++) {
-                float a_val = to_float(A[i * K + k]);
-                float b_val = to_float(B[k * N + j]);
-                sum += a_val * b_val;
+                float a_val = to_float(A[i * K + k]);      // Convert to float for computation
+                float b_val = to_float(B[k * N + j]);      // Convert to float for computation
+                sum += a_val * b_val;                      // Accumulate multiply-add
             }
-            C[i * N + j] = from_float<OutType>(sum);
+            C[i * N + j] = from_float<OutType>(sum);       // Convert back to output type
         }
     }
 }
 
+/**
+ * Initialize vector with random values in range [-1, 1]
+ * @param data Vector to initialize
+ * @param seed Random seed for reproducibility
+ */
 template<typename T>
 void initialize_random(std::vector<T>& data, int seed = 42) {
     std::srand(seed);
     for (auto& val : data) {
+        // Generate random float in [-1, 1] and convert to target type
         val = from_float<T>((std::rand() / float(RAND_MAX)) * 2.0f - 1.0f);
     }
 }
 
+/**
+ * Verify GPU results against CPU reference implementation
+ * Computes relative error statistics and determines if verification passes
+ * 
+ * @param gpu_result GPU computation results
+ * @param cpu_result CPU reference results
+ * @param tolerance Maximum allowed average relative error (default: 0.5%)
+ * @return true if verification passes, false otherwise
+ */
 template<typename T>
 bool verify_results(const std::vector<T>& gpu_result, const std::vector<T>& cpu_result,
                     float tolerance = 0.5f) {
+    // Check size compatibility
     if (gpu_result.size() != cpu_result.size()) return false;
     
-    float max_error = 0.0f;
-    float avg_error = 0.0f;
-    int non_zero_count = 0;
+    float max_error = 0.0f;      // Maximum relative error
+    float avg_error = 0.0f;      // Average relative error
+    int non_zero_count = 0;      // Count of non-zero elements
     
+    // Compute error statistics
     for (size_t i = 0; i < gpu_result.size(); i++) {
         float gpu_val = to_float(gpu_result[i]);
         float cpu_val = to_float(cpu_result[i]);
         
+        // Only compute relative error for non-zero elements
         if (std::abs(cpu_val) > 1e-5f) {
             float rel_error = std::abs(gpu_val - cpu_val) / std::abs(cpu_val);
             max_error = std::max(max_error, rel_error);
@@ -135,11 +205,13 @@ bool verify_results(const std::vector<T>& gpu_result, const std::vector<T>& cpu_
     
     avg_error /= non_zero_count;
     
+    // Print error statistics
     std::cout << "Max relative error: " << max_error 
               << " (over " << non_zero_count << " non-zero elements)" << std::endl;
     std::cout << "Average relative error: " << avg_error 
               << " (" << (avg_error * 100.0f) << "%)" << std::endl;
     
+    // Determine if verification passes
     bool passed = avg_error < tolerance;
     std::cout << (passed ? "✓" : "✗") << " CPU verification " 
               << (passed ? "PASSED" : "FAILED") 

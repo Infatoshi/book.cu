@@ -1,28 +1,48 @@
 
+/**
+ * MNIST Neural Network Implementation with CUDA
+ * Implements a two-layer fully connected network for MNIST digit classification
+ * Demonstrates forward pass, backward pass, and weight updates using custom CUDA kernels
+ */
+
+/**
+ * Timing statistics structure for performance profiling
+ * Tracks execution time of each component in the neural network
+ */
 typedef struct {
-    double data_loading;
-    double fwd_matmul1;
-    double fwd_bias1;
-    double fwd_relu;
-    double fwd_matmul2;
-    double fwd_bias2;
-    double fwd_softmax;
-    double cross_entropy;
-    double bwd_output_grad;
-    double bwd_matmul2;
-    double bwd_bias2;
-    double bwd_relu;
-    double bwd_matmul1;
-    double bwd_bias1;
-    double weight_updates;
-    double total_time;
+    double data_loading;      // Time spent loading data from host to device
+    double fwd_matmul1;      // Time for first matrix multiplication (input -> hidden)
+    double fwd_bias1;        // Time for first bias addition
+    double fwd_relu;         // Time for ReLU activation
+    double fwd_matmul2;      // Time for second matrix multiplication (hidden -> output)
+    double fwd_bias2;        // Time for second bias addition
+    double fwd_softmax;      // Time for softmax activation
+    double cross_entropy;    // Time for cross-entropy loss computation
+    double bwd_output_grad;  // Time for output gradient computation
+    double bwd_matmul2;      // Time for backward matrix multiplication
+    double bwd_bias2;        // Time for backward bias gradient
+    double bwd_relu;         // Time for ReLU backward pass
+    double bwd_matmul1;      // Time for backward matrix multiplication
+    double bwd_bias1;        // Time for backward bias gradient
+    double weight_updates;   // Time for weight updates
+    double total_time;       // Total training time
 } TimingStats;
 
+/**
+ * Calculate time difference between two timespec structures
+ * @param start Start time
+ * @param end End time
+ * @return Time difference in seconds
+ */
 double get_time_diff(struct timespec start, struct timespec end) {
     return (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 }
 
-
+/**
+ * CUDA error checking macro
+ * @param call CUDA function call to check
+ */
+#define CUDA_CHECK(call) \
     do { \
         cudaError_t error = call; \
         if (error != cudaSuccess) { \
@@ -33,15 +53,19 @@ double get_time_diff(struct timespec start, struct timespec end) {
         } \
     } while(0)
 
+/**
+ * Neural network structure containing all weights and gradients
+ * All pointers point to device memory for GPU computation
+ */
 typedef struct {
-    float *weights1;
-    float *weights2;
-    float *bias1;
-    float *bias2;
-    float *grad_weights1;
-    float *grad_weights2;
-    float *grad_bias1;
-    float *grad_bias2;
+    float *weights1;      // First layer weights (INPUT_SIZE × HIDDEN_SIZE)
+    float *weights2;      // Second layer weights (HIDDEN_SIZE × OUTPUT_SIZE)
+    float *bias1;         // First layer bias (HIDDEN_SIZE)
+    float *bias2;         // Second layer bias (OUTPUT_SIZE)
+    float *grad_weights1; // First layer weight gradients
+    float *grad_weights2; // Second layer weight gradients
+    float *grad_bias1;    // First layer bias gradients
+    float *grad_bias2;    // Second layer bias gradients
 } NeuralNetwork;
 
 void load_data(const char *filename, float *data, int size) {
@@ -94,76 +118,162 @@ void normalize_data(float *data, int size) {
 }
 
 
+/**
+ * Matrix multiplication kernel: C = A * B
+ * Each thread computes one element of the output matrix
+ * 
+ * @param A Input matrix A (m×n, device memory)
+ * @param B Input matrix B (n×k, device memory)
+ * @param C Output matrix C (m×k, device memory)
+ * @param m Number of rows in A and C
+ * @param n Number of columns in A and rows in B
+ * @param k Number of columns in B and C
+ */
 __global__ void matmul_a_b_kernel(float *A, float *B, float *C, int m, int n, int k) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    // Calculate 2D coordinates from thread indices
+    int row = blockIdx.y * blockDim.y + threadIdx.y;    // Row index in output matrix
+    int col = blockIdx.x * blockDim.x + threadIdx.x;   // Column index in output matrix
 
+    // Bounds check to ensure we don't access out-of-range elements
     if (row < m && col < k) {
         float sum = 0.0f;
+        // Compute dot product of row A[row,:] and column B[:,col]
         for (int i = 0; i < n; ++i) {
             sum += A[row * n + i] * B[i * k + col];
         }
+        // Store result in output matrix
         C[row * k + col] = sum;
     }
 }
 
+/**
+ * Matrix multiplication kernel: C = A * B^T
+ * Computes matrix multiplication with B transposed
+ * Used in backward pass for gradient computation
+ * 
+ * @param A Input matrix A (m×n, device memory)
+ * @param B Input matrix B (k×n, device memory) - accessed as B^T
+ * @param C Output matrix C (m×k, device memory)
+ * @param m Number of rows in A and C
+ * @param n Number of columns in A and B
+ * @param k Number of rows in B and columns in C
+ */
 __global__ void matmul_a_bt_kernel(float *A, float *B, float *C, int m, int n, int k) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    // Calculate 2D coordinates from thread indices
+    int row = blockIdx.y * blockDim.y + threadIdx.y;    // Row index in output matrix
+    int col = blockIdx.x * blockDim.x + threadIdx.x;   // Column index in output matrix
 
+    // Bounds check
     if (row < m && col < k) {
         float sum = 0.0f;
+        // Compute dot product of row A[row,:] and row B[col,:] (transpose)
         for (int i = 0; i < n; ++i) {
             sum += A[row * n + i] * B[col * n + i];
         }
+        // Store result in output matrix
         C[row * k + col] = sum;
     }
 }
 
+/**
+ * Matrix multiplication kernel: C = A^T * B
+ * Computes matrix multiplication with A transposed
+ * Used in backward pass for weight gradient computation
+ * 
+ * @param A Input matrix A (m×n, device memory) - accessed as A^T
+ * @param B Input matrix B (m×k, device memory)
+ * @param C Output matrix C (n×k, device memory)
+ * @param m Number of rows in A and B
+ * @param n Number of columns in A and rows in C
+ * @param k Number of columns in B and C
+ */
 __global__ void matmul_at_b_kernel(float *A, float *B, float *C, int m, int n, int k) {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    // Calculate 2D coordinates from thread indices
+    int row = blockIdx.y * blockDim.y + threadIdx.y;    // Row index in output matrix
+    int col = blockIdx.x * blockDim.x + threadIdx.x;   // Column index in output matrix
 
+    // Bounds check
     if (row < n && col < k) {
         float sum = 0.0f;
+        // Compute dot product of column A[:,row] and column B[:,col]
         for (int i = 0; i < m; ++i) {
             sum += A[i * n + row] * B[i * k + col];
         }
+        // Store result in output matrix
         C[row * k + col] = sum;
     }
 }
 
+/**
+ * ReLU activation function kernel
+ * Applies ReLU activation: f(x) = max(0, x) element-wise
+ * 
+ * @param x Input/output array (device memory, modified in-place)
+ * @param size Number of elements in the array
+ */
 __global__ void relu_forward_kernel(float *x, int size) {
+    // Calculate global thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    // Bounds check
     if (idx < size) {
+        // Apply ReLU activation: f(x) = max(0, x)
         x[idx] = fmaxf(0.0f, x[idx]);
     }
 }
 
+/**
+ * Bias addition kernel
+ * Adds bias vector to each sample in the batch
+ * 
+ * @param x Input/output array (batch_size × size, device memory, modified in-place)
+ * @param bias Bias vector (size, device memory)
+ * @param batch_size Number of samples in the batch
+ * @param size Size of each sample (feature dimension)
+ */
 __global__ void bias_forward_kernel(float *x, float *bias, int batch_size, int size) {
+    // Calculate global thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int b = idx / size;
-    int i = idx % size;
+    
+    // Extract batch and feature indices
+    int b = idx / size;  // Batch index
+    int i = idx % size;  // Feature index
 
+    // Bounds check
     if (b < batch_size && i < size) {
+        // Add bias to corresponding element
         x[idx] += bias[i];
     }
 }
 
+/**
+ * Softmax activation kernel
+ * Applies softmax normalization to each sample in the batch
+ * Formula: softmax(x_i) = exp(x_i - max(x)) / sum(exp(x_j - max(x)))
+ * 
+ * @param x Input/output array (batch_size × size, device memory, modified in-place)
+ * @param batch_size Number of samples in the batch
+ * @param size Size of each sample (number of classes)
+ */
 __global__ void softmax_kernel(float *x, int batch_size, int size) {
+    // Each block processes one sample in the batch
     int b = blockIdx.x;
+    
     if (b < batch_size) {
+        // Step 1: Find maximum value for numerical stability
         float max_val = x[b * size];
         for (int i = 1; i < size; ++i) {
             max_val = fmaxf(max_val, x[b * size + i]);
         }
 
+        // Step 2: Compute exponentials and sum
         float sum = 0.0f;
         for (int i = 0; i < size; ++i) {
             x[b * size + i] = expf(x[b * size + i] - max_val);
             sum += x[b * size + i];
         }
 
+        // Step 3: Normalize to get probabilities
         for (int i = 0; i < size; ++i) {
             x[b * size + i] = fmaxf(x[b * size + i] / sum, 1e-7f);
         }

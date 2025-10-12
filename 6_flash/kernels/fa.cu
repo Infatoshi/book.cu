@@ -1,9 +1,26 @@
 
-using namespace nvcuda;
+/**
+ * Flash Attention 2.5 Implementation with WMMA Tensor Cores
+ * High-performance attention mechanism using NVIDIA's Tensor Cores
+ * Optimized for memory efficiency and computational throughput
+ */
 
-    {                                          \
+using namespace nvcuda;  // For WMMA API
+
+/**
+ * CUDA error checking macro
+ * @param ans CUDA function call to check
+ */
+#define CUDA_CHECK(ans) {                                          \
         cudaAssert((ans), __FILE__, __LINE__); \
     }
+
+/**
+ * CUDA error assertion function
+ * @param code CUDA error code
+ * @param file Source file name
+ * @param line Line number
+ */
 inline void cudaAssert(cudaError_t code, const char* file, int line) {
     if (code != cudaSuccess) {
         fprintf(stderr, "CUDA error %s: %s at %s: %d\n",
@@ -14,17 +31,28 @@ inline void cudaAssert(cudaError_t code, const char* file, int line) {
 }
 
 
-/*
- * FA2.5: Flash Attention with WMMA Tensor Cores
+/**
+ * Flash Attention 2.5 Kernel with WMMA Tensor Cores
  * 
- * Uses WMMA for:
- * 1. Q @ K^T computation (FP16 → FP32)
- * 2. S @ V computation (FP16 × FP16 → FP32)
+ * Key optimizations:
+ * 1. Uses WMMA for Q @ K^T computation (FP16 → FP32)
+ * 2. Uses WMMA for S @ V computation (FP16 × FP16 → FP32)
+ * 3. Implements online softmax for numerical stability
+ * 4. Memory-efficient tiling strategy
  * 
  * Tile sizes: Br=16, Bc=16 (matches WMMA 16x16x16)
- * Works on: Volta, Turing, Ampere, Ada, Hopper (SM_70+)
+ * Compatible with: Volta, Turing, Ampere, Ada, Hopper (SM_70+)
+ * 
+ * @param Br Block size for rows (must be 16 for WMMA)
+ * @param Bc Block size for columns (must be 16 for WMMA)
+ * @param Q Query matrix (device memory, FP16)
+ * @param K Key matrix (device memory, FP16)
+ * @param V Value matrix (device memory, FP16)
+ * @param N Sequence length
+ * @param d Head dimension (must be multiple of 16)
+ * @param scale Scaling factor (1/sqrt(d))
+ * @param O Output matrix (device memory, FP32)
  */
-
 template <const int Br, const int Bc>
 __global__ void flash_attn_2_5_kernel(
     half* Q, half* K, half* V, 
@@ -219,43 +247,55 @@ __global__ void flash_attn_2_5_kernel(
 }
 
 
+/**
+ * PyTorch wrapper for Flash Attention 2.5 forward pass
+ * 
+ * @param Q Query tensor [B, nh, N, d] (FP32)
+ * @param K Key tensor [B, nh, N, d] (FP32)
+ * @param V Value tensor [B, nh, N, d] (FP32)
+ * @return Output tensor [B, nh, N, d] (FP32)
+ */
 torch::Tensor fa_forward(torch::Tensor Q, torch::Tensor K, torch::Tensor V) {
-    
+    // Convert inputs to FP16 for Tensor Core computation
     auto Q_fp16 = Q.to(torch::kFloat16);
     auto K_fp16 = K.to(torch::kFloat16);
     auto V_fp16 = V.to(torch::kFloat16);
 
-    int B = Q.size(0);
-    int nh = Q.size(1);
-    int N = Q.size(2);
-    int d = Q.size(3);
+    // Extract tensor dimensions
+    int B = Q.size(0);   // Batch size
+    int nh = Q.size(1);  // Number of heads
+    int N = Q.size(2);   // Sequence length
+    int d = Q.size(3);   // Head dimension
 
-    
-    const int Br = 16;
-    const int Bc = 16;
+    // Tile dimensions (must match WMMA fragment size)
+    const int Br = 16;  // Row tile size
+    const int Bc = 16;  // Column tile size
 
+    // Validate head dimension for WMMA compatibility
     assert(d % 16 == 0 && "Head dimension must be multiple of 16 for WMMA");
 
+    // Compute softmax scaling factor
     float softmax_scale = 1.0f / sqrtf(static_cast<float>(d));
 
-    
+    // Allocate output tensor (FP32 for accumulation)
     auto O = torch::zeros({B, nh, N, d}, torch::dtype(torch::kFloat32).device(Q.device()));
 
-    
+    // Calculate shared memory requirements
     size_t smem_size = (
-        Br * d * sizeof(half) +      
-        Bc * d * sizeof(half) +      
-        Bc * d * sizeof(half) +      
-        Br * Bc * sizeof(float) +    
-        Br * Bc * sizeof(half) +     
-        Br * d * sizeof(float) +     
-        3 * Br * sizeof(float)       
+        Br * d * sizeof(half) +      // Qi tile
+        Bc * d * sizeof(half) +      // Kj tile
+        Bc * d * sizeof(half) +      // Vj tile
+        Br * Bc * sizeof(float) +    // Sij_fp32
+        Br * Bc * sizeof(half) +     // Sij_fp16
+        Br * d * sizeof(float) +     // Oi accumulator
+        3 * Br * sizeof(float)        // mi, mi_new, li arrays
     );
 
-    dim3 grid_size(B, nh);
-    dim3 block_size(Br * Bc);
+    // Configure kernel launch parameters
+    dim3 grid_size(B, nh);      // One block per batch and head
+    dim3 block_size(Br * Bc);   // 256 threads per block (16*16)
 
-    
+    // Launch Flash Attention kernel
     flash_attn_2_5_kernel<16, 16><<<grid_size, block_size, smem_size>>>(
         reinterpret_cast<half*>(Q_fp16.data_ptr()),
         reinterpret_cast<half*>(K_fp16.data_ptr()),
@@ -265,8 +305,10 @@ torch::Tensor fa_forward(torch::Tensor Q, torch::Tensor K, torch::Tensor V) {
         O.data_ptr<float>()
     );
 
+    // Check for errors and synchronize
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     
+    // Convert output back to input dtype
     return O.to(Q.dtype());
 }

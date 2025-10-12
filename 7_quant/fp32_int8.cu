@@ -1,26 +1,59 @@
 
 
+/**
+ * FP32 to INT8 Quantization Kernel
+ * Converts floating-point values to 8-bit signed integers
+ * Uses symmetric quantization with scale factor for precision control
+ * 
+ * Quantization formula: q = clamp(round(x / scale), -127, 127)
+ * Dequantization formula: x' = q * scale
+ * 
+ * @param input Input FP32 array (device memory)
+ * @param output Output INT8 array (device memory)
+ * @param scale Scale factor for quantization (max_value / 127)
+ * @param size Number of elements to quantize
+ */
 __global__ void quantize_fp32_to_int8(float* input, signed char* output, float scale, int size) {
+    // Calculate global thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size) return;
 
+    // Apply quantization: divide by scale and clamp to INT8 range
     float scaled = input[idx] / scale;
-    scaled = fmaxf(fminf(scaled, 127.0f), -127.0f);
-    output[idx] = (signed char)roundf(scaled);
+    scaled = fmaxf(fminf(scaled, 127.0f), -127.0f);  // Clamp to [-127, 127]
+    output[idx] = (signed char)roundf(scaled);       // Round to nearest integer
 }
 
+/**
+ * INT8 to FP32 Dequantization Kernel
+ * Converts quantized 8-bit integers back to floating-point values
+ * 
+ * @param input Input INT8 array (device memory)
+ * @param output Output FP32 array (device memory)
+ * @param scale Scale factor used for quantization
+ * @param size Number of elements to dequantize
+ */
 __global__ void dequantize_int8_to_fp32(signed char* input, float* output, float scale, int size) {
+    // Calculate global thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size) return;
 
+    // Apply dequantization: multiply by scale factor
     output[idx] = (float)input[idx] * scale;
 }
 
+/**
+ * Generate random numbers from normal distribution using Box-Muller transform
+ * @param mean Mean of the normal distribution
+ * @param std Standard deviation of the normal distribution
+ * @return Random number from N(mean, std^2)
+ */
 float rand_normal(float mean, float std) {
-    float u1 = (float)rand() / RAND_MAX;
-    float u2 = (float)rand() / RAND_MAX;
+    // Box-Muller transform for generating normal random numbers
+    float u1 = (float)rand() / RAND_MAX;  // Uniform random [0,1]
+    float u2 = (float)rand() / RAND_MAX;  // Uniform random [0,1]
     float z0 = sqrtf(-2.0f * logf(u1)) * cosf(2.0f * 3.141592653589793f * u2);
-    return z0 * std + mean;
+    return z0 * std + mean;  // Scale and shift to desired distribution
 }
 
 int main() {

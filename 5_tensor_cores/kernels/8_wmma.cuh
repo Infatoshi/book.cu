@@ -1,46 +1,81 @@
 
-typedef __half fp16;
+/**
+ * WMMA (Warp Matrix Multiply Accumulate) GEMM implementation using Tensor Cores
+ * Demonstrates high-performance matrix multiplication using NVIDIA's Tensor Cores
+ * with FP16 precision and advanced tiling strategies
+ */
 
-using namespace nvcuda;
+typedef __half fp16;  // Half precision floating point
 
+using namespace nvcuda;  // For WMMA API
+
+/**
+ * High-performance GEMM kernel using WMMA Tensor Cores
+ * Implements advanced tiling with multiple levels of hierarchy:
+ * - Block-level tiling (BM × BN)
+ * - Warp-level tiling (WARP_TILE_M × WARP_TILE_N) 
+ * - WMMA-level tiling (WMMA_M × WMMA_N × WMMA_K)
+ * 
+ * Template parameters:
+ * @param WMMA_M WMMA fragment height (typically 16)
+ * @param WMMA_N WMMA fragment width (typically 16) 
+ * @param WMMA_K WMMA fragment depth (typically 16)
+ * @param WMMA_TILE_M Number of WMMA tiles per warp in M dimension
+ * @param WMMA_TILE_N Number of WMMA tiles per warp in N dimension
+ * @param WARP_TILE_M Number of warps per block in M dimension
+ * @param WARP_TILE_N Number of warps per block in N dimension
+ * 
+ * @param M Number of rows in matrices A and C
+ * @param N Number of columns in matrices B and C
+ * @param K Number of columns in A and rows in B
+ * @param A Input matrix A (M×K, FP16, device memory)
+ * @param B Input matrix B (K×N, FP16, device memory)
+ * @param C Output matrix C (M×N, FP16, device memory)
+ */
 template <int WMMA_M = 16, int WMMA_N = 16, int WMMA_K = 16,
           int WMMA_TILE_M = 4, int WMMA_TILE_N = 2, int WARP_TILE_M = 2,
           int WARP_TILE_N = 4>
 __global__ void __launch_bounds__(WMMA_TILE_M * WMMA_TILE_N * 32)
     gemm_wmma_tiled(int M, int N, int K, const fp16 *__restrict__ A,
                     const fp16 *__restrict__ B, fp16 *__restrict__ C) {
-  constexpr int BM = WMMA_M * WMMA_TILE_M * WARP_TILE_M;  
-  constexpr int BN = WMMA_N * WMMA_TILE_N * WARP_TILE_N;  
-  constexpr int BK = WMMA_K;                              
+  // Block-level tile dimensions
+  constexpr int BM = WMMA_M * WMMA_TILE_M * WARP_TILE_M;  // Block height: 16*4*2 = 128
+  constexpr int BN = WMMA_N * WMMA_TILE_N * WARP_TILE_N;  // Block width: 16*2*4 = 128  
+  constexpr int BK = WMMA_K;                              // Block depth: 16
 
+  // Calculate block's position in the global matrix
   const int blockRow = blockIdx.y * BM;
   const int blockCol = blockIdx.x * BN;
-  if (blockRow >= M || blockCol >= N) return;
+  if (blockRow >= M || blockCol >= N) return;  // Early exit if block is out of bounds
 
-  __shared__ fp16 sA[BM][BK];
-  __shared__ fp16 sB[BK][BN];
-  __shared__ fp16 sC[BM][BN];
+  // Shared memory allocation for block-level tiling
+  __shared__ fp16 sA[BM][BK];  // Shared memory for A tile
+  __shared__ fp16 sB[BK][BN];  // Shared memory for B tile
+  __shared__ fp16 sC[BM][BN];  // Shared memory for C tile
 
-  const int tid = threadIdx.x;
-  const int warp_id = tid / 32;
-  const int lane_id = tid % 32;
-  const int warp_m = warp_id / 2;  
-  const int warp_n = warp_id % 2;  
+  // Thread and warp indexing
+  const int tid = threadIdx.x;           // Thread ID within block
+  const int warp_id = tid / 32;          // Warp ID within block
+  const int lane_id = tid % 32;          // Lane ID within warp
+  const int warp_m = warp_id / 2;        // Warp position in M dimension
+  const int warp_n = warp_id % 2;        // Warp position in N dimension
 
-  const int load_smem_a_m = tid / 2;       
-  const int load_smem_a_k = (tid % 2) * 8;  
-  const int load_smem_b_k = tid / 16;       
-  const int load_smem_b_n = (tid % 16) * 8; 
+  // Memory loading indices for coalesced access
+  const int load_smem_a_m = tid / 2;       // Row index for A loading
+  const int load_smem_a_k = (tid % 2) * 8; // Column index for A loading (8-element vector)
+  const int load_smem_b_k = tid / 16;      // Row index for B loading
+  const int load_smem_b_n = (tid % 16) * 8; // Column index for B loading (8-element vector)
 
+  // Calculate number of K-dimension tiles to process
   const int numKTiles = CEIL_DIV(K, BK);
-  const fp16 zero = __float2half(0.0f);
+  const fp16 zero = __float2half(0.0f);  // Zero value in FP16
 
+  // WMMA accumulator fragments for each warp tile
   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, fp16>
       C_frag[WARP_TILE_M][WARP_TILE_N];
 
-  
+  // Initialize accumulator fragments to zero
   for (int i = 0; i < WARP_TILE_M; ++i) {
-    
     for (int j = 0; j < WARP_TILE_N; ++j) {
       wmma::fill_fragment(C_frag[i][j], zero);
     }
@@ -141,10 +176,27 @@ __global__ void __launch_bounds__(WMMA_TILE_M * WMMA_TILE_N * 32)
   }
 }
 
+/**
+ * Launcher function for WMMA Tensor Core GEMM kernel
+ * Configures grid and block dimensions for optimal performance
+ * 
+ * @param M Number of rows in matrices A and C
+ * @param N Number of columns in matrices B and C
+ * @param K Number of columns in A and rows in B
+ * @param A Input matrix A (M×K, FP16, device memory)
+ * @param B Input matrix B (K×N, FP16, device memory)
+ * @param C Output matrix C (M×N, FP16, device memory)
+ * @param DB Debug buffer (unused, for compatibility)
+ */
 void runKernel8(int M, int N, int K, fp16 *A, fp16 *B, fp16 *C, int *DB = nullptr) {
-  constexpr int BM = 128;
-  constexpr int BN = 128;
-  dim3 gridDim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));
-  dim3 blockDim(256);
+  // Block tile dimensions (must match kernel template parameters)
+  constexpr int BM = 128;  // Block height
+  constexpr int BN = 128;  // Block width
+  
+  // Configure grid and block dimensions
+  dim3 gridDim(CEIL_DIV(N, BN), CEIL_DIV(M, BM));  // One block per tile
+  dim3 blockDim(256);  // 8 warps per block (8 * 32 = 256 threads)
+  
+  // Launch WMMA Tensor Core kernel
   gemm_wmma_tiled<<<gridDim, blockDim>>>(M, N, K, A, B, C);
 }

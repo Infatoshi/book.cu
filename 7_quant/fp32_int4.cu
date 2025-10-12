@@ -1,38 +1,75 @@
 
 
+/**
+ * FP32 to INT4 Quantization Kernel with Packing
+ * Converts floating-point values to 4-bit signed integers and packs them
+ * Two INT4 values are packed into one uint8_t byte for memory efficiency
+ * 
+ * Quantization formula: q = clamp(round(x / scale), -7, 7)
+ * Packing: [q1_4bits][q2_4bits] -> uint8_t
+ * 
+ * @param input Input FP32 array (device memory)
+ * @param output Output packed INT4 array (device memory, size/2 elements)
+ * @param scale Scale factor for quantization (max_value / 7)
+ * @param size Number of FP32 elements to quantize
+ */
 __global__ void quantize_fp32_to_int4_packed(float* input, uint8_t* output, float scale, int size) {
+    // Each thread processes 2 elements (packs them into 1 byte)
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size / 2) return;
 
-    int elem1_idx = idx * 2;
-    int elem2_idx = idx * 2 + 1;
+    // Calculate indices for the two elements to pack
+    int elem1_idx = idx * 2;      // First element index
+    int elem2_idx = idx * 2 + 1;  // Second element index
 
+    // Quantize first element
     float scaled1 = input[elem1_idx] / scale;
-    scaled1 = fmaxf(fminf(scaled1, 7.0f), -7.0f);
+    scaled1 = fmaxf(fminf(scaled1, 7.0f), -7.0f);  // Clamp to [-7, 7]
     int8_t quant1 = (int8_t)roundf(scaled1);
 
+    // Quantize second element (with bounds check)
     float scaled2 = (elem2_idx < size) ? input[elem2_idx] / scale : 0.0f;
     scaled2 = fmaxf(fminf(scaled2, 7.0f), -7.0f);
     int8_t quant2 = (elem2_idx < size) ? (int8_t)roundf(scaled2) : 0;
 
+    // Pack two 4-bit values into one byte
+    // Upper 4 bits: quant1, Lower 4 bits: quant2
     uint8_t packed = ((quant1 & 0xF) << 4) | (quant2 & 0xF);
     output[idx] = packed;
 }
 
+/**
+ * INT4 to FP32 Dequantization Kernel with Unpacking
+ * Unpacks packed INT4 values and converts them back to floating-point
+ * Handles sign extension for negative 4-bit values
+ * 
+ * @param input Input packed INT4 array (device memory, size/2 elements)
+ * @param output Output FP32 array (device memory)
+ * @param scale Scale factor used for quantization
+ * @param size Number of FP32 elements to produce
+ */
 __global__ void dequantize_int4_to_fp32_packed(uint8_t* input, float* output, float scale, int size) {
+    // Each thread unpacks 2 elements from 1 byte
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= size / 2) return;
 
-    int elem1_idx = idx * 2;
-    int elem2_idx = idx * 2 + 1;
+    // Calculate indices for the two elements to unpack
+    int elem1_idx = idx * 2;      // First element index
+    int elem2_idx = idx * 2 + 1;  // Second element index
 
+    // Extract packed byte
     uint8_t packed = input[idx];
-    int8_t quant1 = (packed >> 4) & 0xF;
-    int8_t quant2 = packed & 0xF;
+    
+    // Unpack two 4-bit values
+    int8_t quant1 = (packed >> 4) & 0xF;  // Upper 4 bits
+    int8_t quant2 = packed & 0xF;         // Lower 4 bits
 
-    if (quant1 & 0x8) quant1 |= 0xF0;
-    if (quant2 & 0x8) quant2 |= 0xF0;
+    // Sign extension for negative values (4-bit -> 8-bit)
+    // If MSB is 1, extend with 1s; otherwise extend with 0s
+    if (quant1 & 0x8) quant1 |= 0xF0;  // Sign extend quant1
+    if (quant2 & 0x8) quant2 |= 0xF0;  // Sign extend quant2
 
+    // Dequantize and store results
     output[elem1_idx] = (float)quant1 * scale;
     if (elem2_idx < size) {
         output[elem2_idx] = (float)quant2 * scale;
