@@ -1,3 +1,50 @@
+"""
+Transformer Inference Script with Custom CUDA Kernels
+
+This script demonstrates transformer inference using custom CUDA kernels integrated
+with PyTorch. It supports both dense transformer architectures and Mixture of Experts (MoE)
+architectures for autoregressive text generation.
+
+Architecture Overview:
+    - Transformer model with multi-head attention and feed-forward layers
+    - Supports KV caching for efficient autoregressive generation
+    - Implements both PyTorch baseline and custom CUDA implementations
+    - Compares four implementations: PyTorch Dense, PyTorch MoE, CUDA Dense, CUDA MoE
+
+Key Components:
+    1. PyTorchTransformer: Baseline PyTorch implementation
+       - Standard transformer blocks with attention and feed-forward layers
+       - Supports both dense and MoE feed-forward layers
+       - KV caching for efficient incremental generation
+    
+    2. CustomTransformer: Custom CUDA kernel implementation
+       - Uses custom CUDA kernels from wrapper.inference modules
+       - Matches PyTorch behavior for dense models
+       - MoE routing uses custom softmax and topk kernels
+    
+    3. Inference Pipeline:
+       - Prefill: Process initial prompt tokens (full attention computation)
+       - Decode: Process one token at a time (incremental generation with KV cache)
+       - Autoregressive generation: Generate tokens one by one
+
+Custom CUDA Operations Used:
+    - matmul: Matrix multiplication for attention and feed-forward
+    - gemv: Matrix-vector multiplication for efficient single-token processing
+    - layernorm: Layer normalization before/after attention and feed-forward
+    - softmax: Attention weight computation and MoE routing
+    - topk: Expert selection for MoE architectures
+    - add/mul: Element-wise operations for residual connections and scaling
+
+MoE Architecture:
+    - Multiple expert feed-forward networks (8 experts by default)
+    - Gating network selects top-K experts (top-2 by default) for each token
+    - Sparse routing reduces computation compared to dense models
+    - Note: Current implementation has numerical precision challenges when combining
+      custom softmax and topk (see README.md for details)
+
+Usage:
+    python inference.py [--max_new_tokens 200]
+"""
 
 import torch
 import torch.nn as nn
@@ -25,7 +72,9 @@ USE_PYTORCH_TOPK = False
 torch.manual_seed(seed)
 random.seed(seed)
 
-chars = " !\"
+# Character-level tokenizer: all printable ASCII characters (32-126)
+# Includes: space, punctuation, digits, uppercase/lowercase letters, and common symbols
+chars = ''.join([chr(i) for i in range(32, 127)])
 vocab_size = len(chars)
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = {i: ch for i, ch in enumerate(chars)}

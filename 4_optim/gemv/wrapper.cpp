@@ -1,3 +1,8 @@
+// GEMV PyTorch Extension Wrapper
+// Based in part on Maharshi Pandya's CUDA optimization blog (Apache-2.0 license)
+// https://github.com/Maharshi-Pandya/cuda-mode-resource-stream
+
+#include <torch/extension.h>
 
 void run_kernel_0(float* __restrict__ matd, float* __restrict__ vecd, float* __restrict__ resd, int M, int N);
 void run_kernel_1(float* __restrict__ matd, float* __restrict__ vecd, float* __restrict__ resd, int M, int N);

@@ -1,3 +1,8 @@
+// GEMM PyTorch Extension Wrapper
+// Based in part on Simon Boehm's SGEMM tutorial (MIT License)
+// https://github.com/siboehm/SGEMM_CUDA
+
+#include <torch/extension.h>
 
 void runCublasGemmFP16(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C);
 void runKernel1(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C);

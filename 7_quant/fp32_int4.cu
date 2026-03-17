@@ -1,86 +1,136 @@
-
+/**
+ * @file fp32_int4.cu
+ * @brief Demonstrates FP32 to INT4 quantization and dequantization with bit-packing.
+ *
+ * INT4 quantization offers a significant memory reduction (8x compared to FP32), making
+ * it attractive for deploying large models on memory-constrained devices. A key
+ * implementation detail is "packing," where two 4-bit integers are stored in a single
+ * 8-bit byte (`uint8_t`) to fully realize the memory savings.
+ *
+ * This file contains two kernels:
+ * 1. `quantize_fp32_to_int4_packed`: Converts FP32 values to INT4 and packs two INT4
+ *    values into one `uint8_t`.
+ * 2. `dequantize_int4_to_fp32_packed`: Unpacks the `uint8_t` back into two INT4 values
+ *    and dequantizes them to FP32.
+ *
+ * A crucial step in dequantization is sign extension. Since INT4 can represent negative
+ * numbers (e.g., in the range [-8, 7] or [-7, 7]), the 4-bit value must be correctly
+ * converted to a wider signed type (like `int8_t` or `float`) to preserve its sign.
+ */
 
 /**
- * FP32 to INT4 Quantization Kernel with Packing
- * Converts floating-point values to 4-bit signed integers and packs them
- * Two INT4 values are packed into one uint8_t byte for memory efficiency
- * 
- * Quantization formula: q = clamp(round(x / scale), -7, 7)
- * Packing: [q1_4bits][q2_4bits] -> uint8_t
- * 
- * @param input Input FP32 array (device memory)
- * @param output Output packed INT4 array (device memory, size/2 elements)
- * @param scale Scale factor for quantization (max_value / 7)
- * @param size Number of FP32 elements to quantize
+ * @brief CUDA kernel to quantize an FP32 tensor to a packed INT4 tensor.
+ *
+ * Each thread processes two FP32 elements and packs the resulting two INT4 values
+ * into a single `uint8_t`. The quantization is symmetric, mapping floating-point
+ * values to the signed integer range [-7, 7].
+ *
+ * The quantization formula for each element is:
+ * `q = clamp(round(x / scale), -7, 7)`
+ *
+ * The packing logic places the first quantized value in the most significant 4 bits
+ * and the second in the least significant 4 bits of a byte.
+ *
+ * @param input Pointer to the input FP32 tensor on the device.
+ * @param output Pointer to the output packed `uint8_t` tensor on the device. Its size
+ *               is `ceil(size / 2.0)`.
+ * @param scale The symmetric quantization scaling factor, calculated as `max(abs(input)) / 7.0f`.
+ * @param size The number of elements in the input FP32 tensor.
  */
 __global__ void quantize_fp32_to_int4_packed(float* input, uint8_t* output, float scale, int size) {
-    // Each thread processes 2 elements (packs them into 1 byte)
+    // Each thread is responsible for processing two FP32 elements and packing them.
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= size / 2) return;
+    if (idx >= (size + 1) / 2) return;
 
-    // Calculate indices for the two elements to pack
-    int elem1_idx = idx * 2;      // First element index
-    int elem2_idx = idx * 2 + 1;  // Second element index
+    // Indices of the two FP32 elements to be quantized and packed.
+    int elem1_idx = idx * 2;
+    int elem2_idx = idx * 2 + 1;
 
-    // Quantize first element
+    // --- Quantize the first element ---
     float scaled1 = input[elem1_idx] / scale;
-    scaled1 = fmaxf(fminf(scaled1, 7.0f), -7.0f);  // Clamp to [-7, 7]
+    scaled1 = fmaxf(fminf(scaled1, 7.0f), -7.0f);  // Clamp to the INT4 range [-7, 7].
     int8_t quant1 = (int8_t)roundf(scaled1);
 
-    // Quantize second element (with bounds check)
-    float scaled2 = (elem2_idx < size) ? input[elem2_idx] / scale : 0.0f;
-    scaled2 = fmaxf(fminf(scaled2, 7.0f), -7.0f);
-    int8_t quant2 = (elem2_idx < size) ? (int8_t)roundf(scaled2) : 0;
+    // --- Quantize the second element ---
+    // Handle the case where the tensor has an odd number of elements.
+    int8_t quant2 = 0;
+    if (elem2_idx < size) {
+        float scaled2 = input[elem2_idx] / scale;
+        scaled2 = fmaxf(fminf(scaled2, 7.0f), -7.0f);
+        quant2 = (int8_t)roundf(scaled2);
+    }
 
-    // Pack two 4-bit values into one byte
-    // Upper 4 bits: quant1, Lower 4 bits: quant2
-    uint8_t packed = ((quant1 & 0xF) << 4) | (quant2 & 0xF);
+    // --- Pack the two 4-bit values into a single byte ---
+    // `quant1` is stored in the upper 4 bits, `quant2` in the lower 4 bits.
+    // The `& 0x0F` mask ensures we only take the lower 4 bits of the `int8_t` values.
+    uint8_t packed = ((quant1 & 0x0F) << 4) | (quant2 & 0x0F);
     output[idx] = packed;
 }
 
 /**
- * INT4 to FP32 Dequantization Kernel with Unpacking
- * Unpacks packed INT4 values and converts them back to floating-point
- * Handles sign extension for negative 4-bit values
- * 
- * @param input Input packed INT4 array (device memory, size/2 elements)
- * @param output Output FP32 array (device memory)
- * @param scale Scale factor used for quantization
- * @param size Number of FP32 elements to produce
+ * @brief CUDA kernel to dequantize a packed INT4 tensor back to FP32.
+ *
+ * Each thread unpacks one `uint8_t` to produce two INT4 values, and then dequantizes
+ * them back to FP32. A critical step is sign extension, which correctly interprets
+ * the most significant bit of the 4-bit value as a sign bit.
+ *
+ * @param input Pointer to the input packed `uint8_t` tensor on the device.
+ * @param output Pointer to the output FP32 tensor on the device.
+ * @param scale The scaling factor used during quantization.
+ * @param size The total number of FP32 elements to be produced.
  */
 __global__ void dequantize_int4_to_fp32_packed(uint8_t* input, float* output, float scale, int size) {
-    // Each thread unpacks 2 elements from 1 byte
+    // Each thread unpacks one byte to produce two FP32 values.
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= size / 2) return;
+    if (idx >= (size + 1) / 2) return;
 
-    // Calculate indices for the two elements to unpack
-    int elem1_idx = idx * 2;      // First element index
-    int elem2_idx = idx * 2 + 1;  // Second element index
+    // Indices for the two output FP32 elements.
+    int elem1_idx = idx * 2;
+    int elem2_idx = idx * 2 + 1;
 
-    // Extract packed byte
     uint8_t packed = input[idx];
     
-    // Unpack two 4-bit values
-    int8_t quant1 = (packed >> 4) & 0xF;  // Upper 4 bits
-    int8_t quant2 = packed & 0xF;         // Lower 4 bits
+    // --- Unpack and sign-extend the two 4-bit values ---
+    // Extract the upper 4 bits for the first value.
+    int8_t quant1 = (packed >> 4);
+    // Extract the lower 4 bits for the second value.
+    int8_t quant2 = packed & 0x0F;
 
-    // Sign extension for negative values (4-bit -> 8-bit)
-    // If MSB is 1, extend with 1s; otherwise extend with 0s
-    if (quant1 & 0x8) quant1 |= 0xF0;  // Sign extend quant1
-    if (quant2 & 0x8) quant2 |= 0xF0;  // Sign extend quant2
+    // Sign extension: If the 4th bit (sign bit) is 1, the upper 4 bits of the `int8_t`
+    // must be set to 1 to preserve the negative value.
+    if (quant1 & 0x08) {
+        quant1 |= 0xF0; // e.g., 0b1001 -> 0b11111001 (which is -7)
+    }
+    if (quant2 & 0x08) {
+        quant2 |= 0xF0;
+    }
 
-    // Dequantize and store results
+    // --- Dequantize and store the results ---
     output[elem1_idx] = (float)quant1 * scale;
     if (elem2_idx < size) {
         output[elem2_idx] = (float)quant2 * scale;
     }
 }
 
+/**
+ * @brief Main function to demonstrate and verify FP32 <-> INT4 conversion.
+ *
+ * This function performs the following steps:
+ * 1. Generates a random FP32 host tensor.
+ * 2. Calculates the symmetric quantization scale: `scale = max(abs(data)) / 7.0f`.
+ * 3. Allocates memory on the GPU for the input, packed quantized, and output tensors.
+ * 4. Copies the host data to the GPU.
+ * 5. Launches the `quantize_fp32_to_int4_packed` kernel.
+ * 6. Launches the `dequantize_int4_to_fp32_packed` kernel.
+ * 7. Copies the dequantized result back to the host.
+ * 8. Computes and prints quantization error metrics (MSE, MAE, Max Error).
+ */
 int main() {
     const int SIZE = 1024 * 1024;
     const int THREADS = 256;
     const int BLOCKS = (SIZE + THREADS - 1) / THREADS;
 
+    // --- 1. Data Generation and Scale Calculation ---
     float* h_input = (float*)malloc(SIZE * sizeof(float));
     srand(time(NULL));
 
@@ -90,6 +140,8 @@ int main() {
         max_abs = fmaxf(max_abs, fabsf(h_input[i]));
     }
 
+    // For symmetric INT4 quantization, the scale is determined by the max absolute
+    // value mapped to the edge of the integer range (7 in this case).
     float scale = max_abs / 7.0f;
 
     printf("FP32 -> INT4 Quantization Test\n");
@@ -97,21 +149,26 @@ int main() {
     printf("Memory reduction: 8x (FP32 -> INT4)\n");
     printf("Packing: 2 INT4 values per byte\n\n");
 
+    // --- 2. Device Memory Allocation and Data Transfer ---
     float *d_input, *d_output;
     uint8_t *d_quantized;
 
     cudaMalloc(&d_input, SIZE * sizeof(float));
     cudaMalloc(&d_output, SIZE * sizeof(float));
+    // The quantized output buffer is half the size of the input, plus one byte
+    // if the size is odd (though integer division handles this implicitly).
     cudaMalloc(&d_quantized, (SIZE + 1) / 2 * sizeof(uint8_t));
 
     cudaMemcpy(d_input, h_input, SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
+    // --- 3. Kernel Execution ---
     quantize_fp32_to_int4_packed<<<BLOCKS, THREADS>>>(d_input, d_quantized, scale, SIZE);
     cudaDeviceSynchronize();
 
     dequantize_int4_to_fp32_packed<<<BLOCKS, THREADS>>>(d_quantized, d_output, scale, SIZE);
     cudaDeviceSynchronize();
 
+    // --- 4. Result Verification ---
     float* h_output = (float*)malloc(SIZE * sizeof(float));
     cudaMemcpy(h_output, d_output, SIZE * sizeof(float), cudaMemcpyDeviceToHost);
 
@@ -136,6 +193,7 @@ int main() {
                h_input[i], h_output[i], h_input[i] - h_output[i]);
     }
 
+    // --- 5. Cleanup ---
     cudaFree(d_input);
     cudaFree(d_output);
     cudaFree(d_quantized);

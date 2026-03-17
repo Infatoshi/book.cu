@@ -1,4 +1,11 @@
 
+/**
+ * @file 10_wgmma_larger_tiles.cuh
+ * @brief Wrapper interface for WGMMA GEMM with larger tiles
+ * 
+ * Provides interface to the larger tiles WGMMA implementation (128×128×64 blocks).
+ * Falls back to basic WGMMA if dimensions are not multiples of tile sizes.
+ */
 
 namespace wgmma_k10 {
 

@@ -1,9 +1,23 @@
 
+/**
+ * @file benchmark_helpers.cuh
+ * @brief Helper structures for benchmarking WGMMA kernels
+ * 
+ * Provides utilities for managing matrix memory allocation and layout conversion
+ * during benchmarking. Encapsulates common operations needed for performance testing.
+ */
 
 namespace wgmma_benchmark {
 
 using fp16 = __half;
 
+/**
+ * @brief Structure to manage matrix buffers for benchmarking
+ * 
+ * Maintains column-major buffers for A, B, and C matrices.
+ * Handles allocation, layout conversion, and cleanup automatically.
+ * Useful for repeated benchmark runs with same matrix dimensions.
+ */
 struct PreparedMatrices {
     fp16 *A_col = nullptr;
     fp16 *B_col = nullptr;
@@ -22,6 +36,18 @@ struct PreparedMatrices {
         M = N = K = 0;
     }
     
+    /**
+     * @brief Prepares matrices for WGMMA computation
+     * @param m Number of rows in A and C
+     * @param n Number of columns in B and C
+     * @param k Number of columns in A and rows in B
+     * @param A Input matrix A (row-major)
+     * @param B Input matrix B (row-major)
+     * @return true if preparation successful, false otherwise
+     * 
+     * Allocates buffers if needed and converts A, B to column-major format.
+     * Reuses buffers if dimensions haven't changed.
+     */
     bool prepare(int m, int n, int k, fp16* A, fp16* B) {
         
         if (M != m || N != n || K != k) {
@@ -47,6 +73,12 @@ struct PreparedMatrices {
         return true;
     }
     
+    /**
+     * @brief Converts output matrix C back to row-major layout
+     * @param C Output buffer (row-major) to write results to
+     * 
+     * Converts C_col (column-major) back to C (row-major) after computation.
+     */
     void convert_output_back(fp16* C) {
         wgmma_layout::col_to_row(C_col, C, M, N);
         cudaDeviceSynchronize();

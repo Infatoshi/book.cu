@@ -1,6 +1,30 @@
 
-
-namespace WGMMA_MaxTiles_fp16 {
+/**
+ * @file wgmma_max_tiles_fp16.cuh
+ * @brief WGMMA GEMM implementation with maximum tile sizes and register management
+ * 
+ * This implementation maximizes Tensor Core utilization by:
+ * - Using maximum block tile size: 128×256×64
+ * - Using maximum WGMMA tile size: 64×256×16
+ * - Dynamic register allocation for optimal resource usage
+ * - Producer-consumer pattern with async loads
+ * 
+ * Key Features:
+ * - **Maximum throughput**: Largest supported WGMMA tile sizes
+ * - **Register optimization**: Dynamic register allocation/deallocation
+ * - **Pipeline parallelism**: Async loads with circular buffers
+ * - **Multiple warp groups**: Producer + multiple consumers
+ * 
+ * Register Management:
+ * - Producer warp group deallocates registers to free resources
+ * - Consumer warp groups allocate maximum registers for accumulators
+ * - This allows more blocks to run concurrently (higher occupancy)
+ * 
+ * Performance Characteristics:
+ * - Highest peak performance for large matrices
+ * - Best for compute-bound workloads
+ * - Higher register pressure requires careful tuning
+ */
 
 using fp16 = __half;
 
@@ -271,16 +295,50 @@ struct SMem {
     alignas(128) fp16 B[BK*BN*QSIZE];
 };
 
+/**
+ * @brief Dynamically allocates registers for warp group
+ * @tparam RegCount Number of registers to allocate
+ * 
+ * Increases the register limit for the current warp group, allowing more
+ * accumulator registers for WGMMA operations. This enables larger tile sizes
+ * while maintaining reasonable occupancy.
+ */
 template <uint32_t RegCount>
 __device__ void warpgroup_reg_alloc() {
     asm volatile("setmaxnreg.inc.sync.aligned.u32 %0;\n" : : "n"(RegCount));
 }
 
+/**
+ * @brief Dynamically deallocates registers for warp group
+ * @tparam RegCount Number of registers to deallocate
+ * 
+ * Decreases the register limit, freeing resources for other warp groups.
+ * Used by producer warp groups that don't need many accumulator registers.
+ */
 template <uint32_t RegCount>
 __device__ void warpgroup_reg_dealloc() {
     asm volatile("setmaxnreg.dec.sync.aligned.u32 %0;\n" : : "n"(RegCount));
 }
 
+/**
+ * @brief Maximum performance GEMM kernel with register optimization
+ * @tparam BM Block tile size in M dimension (128)
+ * @tparam BN Block tile size in N dimension (256)
+ * @tparam BK Block tile size in K dimension (64)
+ * @tparam NUM_THREADS Number of threads per block (384 = 3 warp groups)
+ * @tparam QSIZE Number of shared memory buffers (3)
+ * 
+ * This kernel combines:
+ * - Maximum WGMMA tile sizes (64×256)
+ * - Producer-consumer async loading
+ * - Dynamic register allocation for optimal occupancy
+ * 
+ * Register Strategy:
+ * - Producer (wg_idx=0): Deallocates registers (fewer needed)
+ * - Consumers (wg_idx>0): Allocates maximum registers for accumulators
+ * 
+ * This allows more blocks to run concurrently while maintaining large accumulator arrays.
+ */
 template<int BM, int BN, int BK, int NUM_THREADS, int QSIZE>
 __global__  __launch_bounds__(NUM_THREADS) void  matmulKernel5(int M, int N, int K, fp16* C, const CUtensorMap* tensorMapA, const CUtensorMap* tensorMapB) {
     constexpr int WGMMA_M = 64, WGMMA_K = 16, WGMMA_N=BN;

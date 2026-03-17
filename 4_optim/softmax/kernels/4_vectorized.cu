@@ -1,4 +1,16 @@
+// Softmax Vectorized Implementation
+// Based in part on Maharshi Pandya's CUDA optimization blog (Apache-2.0 license)
+// https://github.com/Maharshi-Pandya/cuda-mode-resource-stream
 
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+
+// Ceiling division macro
+#ifndef CEIL_DIV
+#define CEIL_DIV(x, y) (((x) + (y) - 1) / (y))
+#endif
 
 static __device__ __forceinline__ float warpReduceSum(float val) {
     for (int offset = 16; offset > 0; offset /= 2) {

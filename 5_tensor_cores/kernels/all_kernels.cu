@@ -1,3 +1,10 @@
+/**
+ * @file all_kernels.cu
+ * @brief Implementation file for kernel launcher functions
+ * 
+ * Provides wrapper functions that convert between different tensor types
+ * (PyTorch Half vs CUDA __half) and launch the appropriate kernels.
+ */
 
 using at_fp16 = c10::Half;
 

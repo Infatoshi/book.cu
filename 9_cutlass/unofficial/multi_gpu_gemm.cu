@@ -1,7 +1,48 @@
+/**
+ * @file multi_gpu_gemm.cu
+ * @brief A multi-GPU GEMM scaling benchmark using NVIDIA's CUTLASS library.
+ *
+ * @details This example demonstrates how to run multiple independent GEMM computations across
+ *          several GPUs to measure scaling performance. It uses the same high-performance
+ *          CUTLASS kernel as the single-GPU example, optimized for the Hopper architecture.
+ *
+ *          **Important**: This is NOT a distributed GEMM implementation that solves a single large
+ *          problem across multiple GPUs. Instead, it runs a separate, identical GEMM on each
+ * a         vailable GPU and aggregates the performance. This is useful for testing the throughput
+ *          of a system with multiple GPUs.
+ *
+ *          This file showcases:
+ *          - Initialization of multiple GPUs.
+ *          - Use of NCCL for basic communicator setup (though not used for communication in the GEMM itself).
+ *          - A loop to launch the same CUTLASS GEMM kernel on each device.
+ *          - Calculation of aggregate performance and scaling efficiency.
+ *
+ *          The CUTLASS kernel configuration is identical to the single-GPU example.
+ */
 
+#include <iostream>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <numeric>
+
+#include "cutlass/cutlass.h"
+#include "cutlass/gemm/device/gemm_universal_adapter.h"
+#include "cutlass/gemm/kernel/gemm_universal.h"
+#include "cutlass/gemm/collective/collective_builder.h"
+#include "cutlass/epilogue/collective/collective_builder.h"
+#include "cutlass/epilogue/fusion/linear_combination.h"
+#include "cutlass/util/device_memory.h"
+#include "cutlass/util/host_tensor.h"
+#include "cutlass/util/reference/host/tensor_fill.h"
+#include "cutlass/util/reference/host/tensor_compare.h"
+#include "nccl.h"
 
 using namespace cute;
 
+//
+// CUTLASS GEMM Configuration (Identical to single-GPU example)
+//
 using ArchTag = cutlass::arch::Sm90;
 using ElementInput = cutlass::half_t;
 using ElementOutput = cutlass::half_t;
@@ -57,6 +98,7 @@ using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
 
 using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
+#define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
         if (err != cudaSuccess) { \
@@ -66,14 +108,18 @@ using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
         } \
     } while(0)
 
+#define NCCL_CHECK(call) \
     do { \
         ncclResult_t err = call; \
-        if (err != ncclSuccess) { \
+        if (err != ncclSuccess) {
             std::cerr << "NCCL error at " << __FILE__ << ":" << __LINE__ << " - " \
                       << ncclGetErrorString(err) << std::endl; \
             exit(1); \
         } \
     } while(0)
+
+// Helper functions (to_float, from_float, cpu_gemm, etc.) are identical to single_gpu_gemm.cu
+// and are included here for completeness.
 
 template<typename T>
 float to_float(T val) {
@@ -142,7 +188,7 @@ bool verify_results(const std::vector<T>& gpu_result, const std::vector<T>& cpu_
         }
     }
     
-    avg_error /= non_zero_count;
+    avg_error /= non_zero_count > 0 ? non_zero_count : 1;
     
     std::cout << "Max relative error: " << max_error 
               << " (over " << non_zero_count << " non-zero elements)" << std::endl;
@@ -157,8 +203,12 @@ bool verify_results(const std::vector<T>& gpu_result, const std::vector<T>& cpu_
     return passed;
 }
 
+/**
+ * @brief Runs a single GEMM operation on the currently selected GPU and returns its performance.
+ * @return Performance in TFLOPS.
+ */
 template<typename InType, typename OutType>
-void run_gemm(const std::vector<InType>& h_A, const std::vector<InType>& h_B,
+double run_gemm(const std::vector<InType>& h_A, const std::vector<InType>& h_B,
               std::vector<OutType>& h_C, int M, int N, int K,
               int warmup_iters = 5, int bench_iters = 10) {
     
@@ -218,8 +268,7 @@ void run_gemm(const std::vector<InType>& h_A, const std::vector<InType>& h_B,
     double time_ms = std::chrono::duration<double, std::milli>(end - start).count() / bench_iters;
     double tflops = (2.0 * M * N * K) / (time_ms * 1e9);
     
-    std::cout << "Average time: " << time_ms << " ms" << std::endl;
-    std::cout << "Performance: " << tflops << " TFLOPS" << std::endl;
+    std::cout << "Average time: " << time_ms << " ms | Performance: " << tflops << " TFLOPS" << std::endl;
     
     CUDA_CHECK(cudaMemcpy(h_C.data(), d_C, M * N * sizeof(OutType), cudaMemcpyDeviceToHost));
     
@@ -227,26 +276,33 @@ void run_gemm(const std::vector<InType>& h_A, const std::vector<InType>& h_B,
     cudaFree(d_A);
     cudaFree(d_B);
     cudaFree(d_C);
+
+    return tflops;
 }
 
 int main(int argc, char** argv) {
-    std::cout << "\n=== CUTLASS Multi-GPU GEMM ===" << std::endl;
+    std::cout << "\n=== CUTLASS Multi-GPU GEMM Scaling Benchmark ===" << std::endl;
     
+    // Get the number of available GPUs.
     int num_devices;
     CUDA_CHECK(cudaGetDeviceCount(&num_devices));
     std::cout << "Detected " << num_devices << " GPU(s)" << std::endl;
     
     if (num_devices < 2) {
-        std::cout << "Multi-GPU requires at least 2 GPUs. Running single-GPU benchmark instead." << std::endl;
-        num_devices = 1;
+        std::cout << "This benchmark is for multi-GPU scaling. Only 1 GPU detected. "
+                  << "Running a single-GPU benchmark instead." << std::endl;
     }
     
+    // Initialize NCCL communicators if we have more than one GPU.
+    // NCCL is a library for multi-GPU and multi-node collective communication.
     ncclComm_t* comms = nullptr;
     if (num_devices > 1) {
         comms = new ncclComm_t[num_devices];
+        // Create a unique ID for the NCCL communicator group.
         ncclUniqueId nccl_id;
         NCCL_CHECK(ncclGetUniqueId(&nccl_id));
         
+        // Initialize one communicator per GPU.
         for (int i = 0; i < num_devices; i++) {
             CUDA_CHECK(cudaSetDevice(i));
             NCCL_CHECK(ncclCommInitRank(&comms[i], num_devices, nccl_id, i));
@@ -255,8 +311,14 @@ int main(int argc, char** argv) {
     
     std::cout << std::endl;
     
+    //
+    // Part 1: Verification (on a single GPU)
+    //
+    // Before benchmarking, we run a smaller problem on a single GPU (device 0) to verify
+    // the correctness of the CUTLASS kernel against a CPU reference.
+    //
     {
-        std::cout << "=== CPU Verification (1024³) ===" << std::endl;
+        std::cout << "=== CPU Verification (1024³) on GPU 0 ===" << std::endl;
         const int M = 1024, N = 1024, K = 1024;
         
         std::vector<ElementInput> h_A(M * K);
@@ -274,6 +336,7 @@ int main(int argc, char** argv) {
         double cpu_time = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
         std::cout << "CPU GEMM time: " << cpu_time << " ms" << std::endl;
         
+        // Set the active device to GPU 0 for the verification run.
         CUDA_CHECK(cudaSetDevice(0));
         run_gemm(h_A, h_B, h_C_gpu, M, N, K, 1, 1);
         
@@ -292,14 +355,21 @@ int main(int argc, char** argv) {
         std::cout << std::endl;
     }
     
+    //
+    // Part 2: Multi-GPU Scaling Benchmark
+    //
+    // This section runs an independent GEMM benchmark on each available GPU.
+    //
     {
-        std::cout << "=== Multi-GPU Scaling Test (8192³) ===" << std::endl;
+        std::cout << "=== Multi-GPU Scaling Benchmark (8192³) ===" << std::endl;
         const int M = 8192, N = 8192, K = 8192;
         
+        // Host data for each GPU.
         std::vector<std::vector<ElementInput>> h_A(num_devices);
         std::vector<std::vector<ElementInput>> h_B(num_devices);
         std::vector<std::vector<ElementOutput>> h_C(num_devices);
         
+        // Initialize data for each GPU's benchmark.
         for (int device = 0; device < num_devices; device++) {
             h_A[device].resize(M * K);
             h_B[device].resize(K * N);
@@ -309,28 +379,30 @@ int main(int argc, char** argv) {
             initialize_random(h_B[device], 43 + device);
         }
         
-        std::vector<double> times(num_devices);
-        std::vector<double> tflops(num_devices);
+        std::vector<double> tflops_per_gpu(num_devices);
         
+        // Loop over each device and run the benchmark.
         for (int device = 0; device < num_devices; device++) {
             CUDA_CHECK(cudaSetDevice(device));
-            std::cout << "GPU " << device << ": ";
-            run_gemm(h_A[device], h_B[device], h_C[device], M, N, K, 5, 10);
-            times[device] = (2.0 * M * N * K) / (tflops[device] * 1e9);
+            std::cout << "Running benchmark on GPU " << device << "..." << std::endl;
+            tflops_per_gpu[device] = run_gemm(h_A[device], h_B[device], h_C[device], M, N, K, 5, 10);
         }
         
+        // If more than one GPU was used, calculate and print scaling results.
         if (num_devices > 1) {
-            double total_tflops = 0.0;
-            for (int device = 0; device < num_devices; device++) {
-                total_tflops += tflops[device];
-            }
+            double total_tflops = std::accumulate(tflops_per_gpu.begin(), tflops_per_gpu.end(), 0.0);
+            double single_gpu_tflops = tflops_per_gpu[0];
+            double ideal_tflops = num_devices * single_gpu_tflops;
+            double scaling_efficiency = (total_tflops / ideal_tflops) * 100.0;
             
             std::cout << "\n=== Scaling Summary ===" << std::endl;
             std::cout << "Total aggregate performance: " << total_tflops << " TFLOPS" << std::endl;
-            std::cout << "Scaling efficiency: " << (total_tflops / (num_devices * tflops[0]) * 100.0) << "%" << std::endl;
+            std::cout << "Ideal performance: " << ideal_tflops << " TFLOPS (based on GPU 0)" << std::endl;
+            std::cout << "Scaling efficiency: " << scaling_efficiency << "%" << std::endl;
         }
     }
     
+    // Clean up NCCL communicators.
     if (comms) {
         for (int i = 0; i < num_devices; i++) {
             ncclCommDestroy(comms[i]);

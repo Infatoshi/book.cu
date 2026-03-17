@@ -68,6 +68,12 @@ typedef struct {
     float *grad_bias2;    // Second layer bias gradients
 } NeuralNetwork;
 
+/**
+ * Load binary data from file
+ * @param filename Path to binary file
+ * @param data Pointer to buffer to store data
+ * @param size Number of elements to read
+ */
 void load_data(const char *filename, float *data, int size) {
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
@@ -82,6 +88,12 @@ void load_data(const char *filename, float *data, int size) {
     fclose(file);
 }
 
+/**
+ * Load binary labels from file
+ * @param filename Path to binary file
+ * @param labels Pointer to buffer to store labels
+ * @param size Number of labels to read
+ */
 void load_labels(const char *filename, int *labels, int size) {
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
@@ -96,19 +108,35 @@ void load_labels(const char *filename, int *labels, int size) {
     fclose(file);
 }
 
+/**
+ * Initialize weights using He initialization
+ * @param weights Pointer to weight array
+ * @param input_size Input dimension
+ * @param output_size Output dimension
+ */
 void initialize_weights(float *weights, int input_size, int output_size) {
-    float scale = sqrtf(2.0f / input_size);
+    float scale = sqrtf(6.0f / input_size);
     for (int i = 0; i < input_size * output_size; i++) {
         weights[i] = ((float)rand() / RAND_MAX) * 2.0f * scale - scale;
     }
 }
 
+/**
+ * Initialize bias to zero
+ * @param bias Pointer to bias array
+ * @param size Size of bias array
+ */
 void initialize_bias(float *bias, int size) {
     for (int i = 0; i < size; i++) {
         bias[i] = 0.0f;
     }
 }
 
+/**
+ * Normalize data using MNIST dataset statistics
+ * @param data Pointer to data array
+ * @param size Number of elements to normalize
+ */
 void normalize_data(float *data, int size) {
     const float mean = 0.1307f;
     const float std = 0.3081f;
@@ -280,6 +308,12 @@ __global__ void softmax_kernel(float *x, int batch_size, int size) {
     }
 }
 
+/**
+ * Zero out gradient arrays kernel
+ * Sets all gradient values to zero
+ * @param grad Gradient array (device memory, modified in-place)
+ * @param size Number of elements
+ */
 __global__ void zero_grad_kernel(float *grad, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
@@ -287,30 +321,58 @@ __global__ void zero_grad_kernel(float *grad, int size) {
     }
 }
 
+/**
+ * Compute output gradients from softmax and labels
+ * Computes gradient of cross-entropy loss with respect to output
+ * @param grad_output Output gradient array (batch_size × OUTPUT_SIZE, device memory)
+ * @param output Output probabilities (batch_size × OUTPUT_SIZE, device memory)
+ * @param labels True labels (batch_size, device memory)
+ * @param batch_size Number of samples in the batch
+ */
 __global__ void compute_output_gradients_kernel(float *grad_output, float *output, int *labels, int batch_size) {
     int b = blockIdx.x * blockDim.x + threadIdx.x;
     if (b < batch_size) {
+        // Initialize gradients with softmax probabilities
         for (int i = 0; i < OUTPUT_SIZE; ++i) {
             grad_output[b * OUTPUT_SIZE + i] = output[b * OUTPUT_SIZE + i];
         }
+        // Subtract 1 from the true label position (derivative of cross-entropy)
         grad_output[b * OUTPUT_SIZE + labels[b]] -= 1.0f;
 
+        // Normalize by batch size
         for (int i = 0; i < OUTPUT_SIZE; ++i) {
             grad_output[b * OUTPUT_SIZE + i] /= batch_size;
         }
     }
 }
 
+/**
+ * ReLU backward pass kernel
+ * Computes gradient through ReLU activation
+ * @param grad Gradient array (device memory, modified in-place)
+ * @param x Input values from forward pass
+ * @param size Number of elements
+ */
 __global__ void relu_backward_kernel(float *grad, float *x, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
+        // ReLU derivative: 1 if x > 0, else 0
         grad[idx] *= (x[idx] > 0.0f ? 1.0f : 0.0f);
     }
 }
 
+/**
+ * Bias gradient computation kernel
+ * Accumulates gradients across batch dimension
+ * @param grad_bias Bias gradient array (size, device memory)
+ * @param grad Gradient array (batch_size × size, device memory)
+ * @param batch_size Number of samples in the batch
+ * @param size Size of each sample
+ */
 __global__ void bias_backward_kernel(float *grad_bias, float *grad, int batch_size, int size) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < size) {
+        // Sum gradients across batch dimension
         float sum = 0.0f;
         for (int b = 0; b < batch_size; b++) {
             sum += grad[b * size + i];
@@ -319,6 +381,13 @@ __global__ void bias_backward_kernel(float *grad_bias, float *grad, int batch_si
     }
 }
 
+/**
+ * Weight update kernel
+ * Performs gradient descent: weights = weights - learning_rate * grad_weights
+ * @param weights Weight array (device memory, modified in-place)
+ * @param grad_weights Gradient array (device memory)
+ * @param size Number of elements
+ */
 __global__ void weight_update_kernel(float *weights, float *grad_weights, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
@@ -326,10 +395,21 @@ __global__ void weight_update_kernel(float *weights, float *grad_weights, int si
     }
 }
 
+/**
+ * Forward pass with timing
+ * Performs forward propagation through the network
+ * @param nn Pointer to neural network structure
+ * @param input Input batch (batch_size × INPUT_SIZE, device memory)
+ * @param hidden Hidden layer output (batch_size × HIDDEN_SIZE, device memory)
+ * @param output Output layer output (batch_size × OUTPUT_SIZE, device memory)
+ * @param batch_size Number of samples in the batch
+ * @param stats Pointer to timing statistics structure
+ */
 void forward_timed(NeuralNetwork *nn, float *input, float *hidden, float *output, int batch_size, TimingStats *stats) {
     struct timespec start, end;
     dim3 block_size(32, 32);
 
+    // First matrix multiplication: input -> hidden
     clock_gettime(CLOCK_MONOTONIC, &start);
     dim3 grid_size1((HIDDEN_SIZE + block_size.x - 1) / block_size.x, (batch_size + block_size.y - 1) / block_size.y);
     matmul_a_b_kernel<<<grid_size1, block_size>>>(input, nn->weights1, hidden, batch_size, INPUT_SIZE, HIDDEN_SIZE);
@@ -337,18 +417,21 @@ void forward_timed(NeuralNetwork *nn, float *input, float *hidden, float *output
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->fwd_matmul1 += get_time_diff(start, end);
 
+    // First bias addition
     clock_gettime(CLOCK_MONOTONIC, &start);
     bias_forward_kernel<<<(batch_size * HIDDEN_SIZE + 255) / 256, 256>>>(hidden, nn->bias1, batch_size, HIDDEN_SIZE);
     CUDA_CHECK(cudaDeviceSynchronize());
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->fwd_bias1 += get_time_diff(start, end);
 
+    // ReLU activation
     clock_gettime(CLOCK_MONOTONIC, &start);
     relu_forward_kernel<<<(batch_size * HIDDEN_SIZE + 255) / 256, 256>>>(hidden, batch_size * HIDDEN_SIZE);
     CUDA_CHECK(cudaDeviceSynchronize());
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->fwd_relu += get_time_diff(start, end);
 
+    // Second matrix multiplication: hidden -> output
     clock_gettime(CLOCK_MONOTONIC, &start);
     dim3 grid_size2((OUTPUT_SIZE + block_size.x - 1) / block_size.x, (batch_size + block_size.y - 1) / block_size.y);
     matmul_a_b_kernel<<<grid_size2, block_size>>>(hidden, nn->weights2, output, batch_size, HIDDEN_SIZE, OUTPUT_SIZE);
@@ -356,12 +439,14 @@ void forward_timed(NeuralNetwork *nn, float *input, float *hidden, float *output
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->fwd_matmul2 += get_time_diff(start, end);
 
+    // Second bias addition
     clock_gettime(CLOCK_MONOTONIC, &start);
     bias_forward_kernel<<<(batch_size * OUTPUT_SIZE + 255) / 256, 256>>>(output, nn->bias2, batch_size, OUTPUT_SIZE);
     CUDA_CHECK(cudaDeviceSynchronize());
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->fwd_bias2 += get_time_diff(start, end);
 
+    // Softmax activation
     clock_gettime(CLOCK_MONOTONIC, &start);
     softmax_kernel<<<batch_size, 1>>>(output, batch_size, OUTPUT_SIZE);
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -369,6 +454,13 @@ void forward_timed(NeuralNetwork *nn, float *input, float *hidden, float *output
     stats->fwd_softmax += get_time_diff(start, end);
 }
 
+/**
+ * Compute cross-entropy loss
+ * @param output Output probabilities (batch_size × OUTPUT_SIZE)
+ * @param labels True labels (batch_size)
+ * @param batch_size Number of samples in the batch
+ * @return Average cross-entropy loss
+ */
 float cross_entropy_loss(float *output, int *labels, int batch_size) {
     float total_loss = 0.0f;
     for (int b = 0; b < batch_size; b++) {
@@ -377,26 +469,41 @@ float cross_entropy_loss(float *output, int *labels, int batch_size) {
     return total_loss / batch_size;
 }
 
+/**
+ * Backward pass with timing
+ * Performs backpropagation through the network
+ * @param nn Pointer to neural network structure
+ * @param input Input batch (batch_size × INPUT_SIZE, device memory)
+ * @param hidden Hidden layer output from forward pass (batch_size × HIDDEN_SIZE, device memory)
+ * @param output Output layer output from forward pass (batch_size × OUTPUT_SIZE, device memory)
+ * @param labels True labels (batch_size, device memory)
+ * @param batch_size Number of samples in the batch
+ * @param stats Pointer to timing statistics structure
+ */
 void backward_timed(NeuralNetwork *nn, float *input, float *hidden, float *output, int *labels, int batch_size, TimingStats *stats) {
     struct timespec start, end;
     dim3 block_size(32, 32);
 
+    // Zero out all gradients
     zero_grad_kernel<<<(HIDDEN_SIZE * INPUT_SIZE + 255) / 256, 256>>>(nn->grad_weights1, HIDDEN_SIZE * INPUT_SIZE);
     zero_grad_kernel<<<(OUTPUT_SIZE * HIDDEN_SIZE + 255) / 256, 256>>>(nn->grad_weights2, OUTPUT_SIZE * HIDDEN_SIZE);
     zero_grad_kernel<<<(HIDDEN_SIZE + 255) / 256, 256>>>(nn->grad_bias1, HIDDEN_SIZE);
     zero_grad_kernel<<<(OUTPUT_SIZE + 255) / 256, 256>>>(nn->grad_bias2, OUTPUT_SIZE);
 
+    // Allocate temporary device memory for gradients
     float *grad_output, *dX2, *d_ReLU_out;
     CUDA_CHECK(cudaMalloc(&grad_output, batch_size * OUTPUT_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&dX2, batch_size * HIDDEN_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_ReLU_out, batch_size * HIDDEN_SIZE * sizeof(float)));
 
+    // Compute output gradients
     clock_gettime(CLOCK_MONOTONIC, &start);
     compute_output_gradients_kernel<<<(batch_size + 255) / 256, 256>>>(grad_output, output, labels, batch_size);
     CUDA_CHECK(cudaDeviceSynchronize());
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->bwd_output_grad += get_time_diff(start, end);
 
+    // Backward pass through second layer
     clock_gettime(CLOCK_MONOTONIC, &start);
     dim3 grid_weights2((OUTPUT_SIZE + block_size.x - 1) / block_size.x, (HIDDEN_SIZE + block_size.y - 1) / block_size.y);
     matmul_at_b_kernel<<<grid_weights2, block_size>>>(hidden, grad_output, nn->grad_weights2, batch_size, HIDDEN_SIZE, OUTPUT_SIZE);
@@ -404,15 +511,18 @@ void backward_timed(NeuralNetwork *nn, float *input, float *hidden, float *outpu
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->bwd_matmul2 += get_time_diff(start, end);
 
+    // Compute bias gradients for second layer
     clock_gettime(CLOCK_MONOTONIC, &start);
     bias_backward_kernel<<<(OUTPUT_SIZE + 255) / 256, 256>>>(nn->grad_bias2, grad_output, batch_size, OUTPUT_SIZE);
     CUDA_CHECK(cudaDeviceSynchronize());
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->bwd_bias2 += get_time_diff(start, end);
 
+    // Propagate gradients back through weights: grad_hidden = grad_output * weights2^T
     dim3 grid_hidden((HIDDEN_SIZE + block_size.x - 1) / block_size.x, (batch_size + block_size.y - 1) / block_size.y);
     matmul_a_bt_kernel<<<grid_hidden, block_size>>>(grad_output, nn->weights2, dX2, batch_size, OUTPUT_SIZE, HIDDEN_SIZE);
 
+    // Apply ReLU backward pass
     clock_gettime(CLOCK_MONOTONIC, &start);
     relu_backward_kernel<<<(batch_size * HIDDEN_SIZE + 255) / 256, 256>>>(dX2, hidden, batch_size * HIDDEN_SIZE);
     CUDA_CHECK(cudaMemcpy(d_ReLU_out, dX2, batch_size * HIDDEN_SIZE * sizeof(float), cudaMemcpyDeviceToDevice));
@@ -420,6 +530,7 @@ void backward_timed(NeuralNetwork *nn, float *input, float *hidden, float *outpu
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->bwd_relu += get_time_diff(start, end);
 
+    // Backward pass through first layer
     clock_gettime(CLOCK_MONOTONIC, &start);
     dim3 grid_weights1((HIDDEN_SIZE + block_size.x - 1) / block_size.x, (INPUT_SIZE + block_size.y - 1) / block_size.y);
     matmul_at_b_kernel<<<grid_weights1, block_size>>>(input, d_ReLU_out, nn->grad_weights1, batch_size, INPUT_SIZE, HIDDEN_SIZE);
@@ -427,21 +538,29 @@ void backward_timed(NeuralNetwork *nn, float *input, float *hidden, float *outpu
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->bwd_matmul1 += get_time_diff(start, end);
 
+    // Compute bias gradients for first layer
     clock_gettime(CLOCK_MONOTONIC, &start);
     bias_backward_kernel<<<(HIDDEN_SIZE + 255) / 256, 256>>>(nn->grad_bias1, d_ReLU_out, batch_size, HIDDEN_SIZE);
     CUDA_CHECK(cudaDeviceSynchronize());
     clock_gettime(CLOCK_MONOTONIC, &end);
     stats->bwd_bias1 += get_time_diff(start, end);
 
+    // Free temporary device memory
     CUDA_CHECK(cudaFree(grad_output));
     CUDA_CHECK(cudaFree(dX2));
     CUDA_CHECK(cudaFree(d_ReLU_out));
 }
 
+/**
+ * Update weights using gradient descent
+ * @param nn Pointer to neural network structure
+ * @param stats Pointer to timing statistics structure
+ */
 void update_weights_timed(NeuralNetwork *nn, TimingStats *stats) {
     struct timespec start, end;
 
     clock_gettime(CLOCK_MONOTONIC, &start);
+    // Update all weights and biases using gradient descent
     weight_update_kernel<<<(HIDDEN_SIZE * INPUT_SIZE + 255) / 256, 256>>>(nn->weights1, nn->grad_weights1, HIDDEN_SIZE * INPUT_SIZE);
     weight_update_kernel<<<(OUTPUT_SIZE * HIDDEN_SIZE + 255) / 256, 256>>>(nn->weights2, nn->grad_weights2, OUTPUT_SIZE * HIDDEN_SIZE);
     weight_update_kernel<<<(HIDDEN_SIZE + 255) / 256, 256>>>(nn->bias1, nn->grad_bias1, HIDDEN_SIZE);
@@ -451,7 +570,14 @@ void update_weights_timed(NeuralNetwork *nn, TimingStats *stats) {
     stats->weight_updates += get_time_diff(start, end);
 }
 
+/**
+ * Train the neural network
+ * @param nn Pointer to neural network structure
+ * @param X_train Training data (TRAIN_SIZE × INPUT_SIZE, host memory)
+ * @param y_train Training labels (TRAIN_SIZE, host memory)
+ */
 void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
+    // Allocate device memory for intermediate activations
     float *d_hidden, *d_output, *d_input_batch;
     int *d_labels_batch;
 
@@ -460,6 +586,7 @@ void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
     CUDA_CHECK(cudaMalloc(&d_input_batch, BATCH_SIZE * INPUT_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_labels_batch, BATCH_SIZE * sizeof(int)));
 
+    // Allocate host memory for output (used for loss computation)
     float *h_output = (float *)malloc(BATCH_SIZE * OUTPUT_SIZE * sizeof(float));
 
     int num_batches = TRAIN_SIZE / BATCH_SIZE;
@@ -469,12 +596,15 @@ void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
     struct timespec total_start, total_end, step_start, step_end;
     clock_gettime(CLOCK_MONOTONIC, &total_start);
 
+    // Training loop over epochs
     for (int epoch = 0; epoch < EPOCHS; epoch++) {
         float total_loss = 0.0f;
 
+        // Process each batch
         for (int batch = 0; batch < num_batches; batch++) {
             int start_idx = batch * BATCH_SIZE;
 
+            // Load batch data and copy to device
             clock_gettime(CLOCK_MONOTONIC, &step_start);
             float *batch_input = &X_train[start_idx * INPUT_SIZE];
             int *batch_labels = &y_train[start_idx];
@@ -484,18 +614,23 @@ void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
             clock_gettime(CLOCK_MONOTONIC, &step_end);
             stats.data_loading += get_time_diff(step_start, step_end);
 
+            // Forward pass
             forward_timed(nn, d_input_batch, d_hidden, d_output, BATCH_SIZE, &stats);
 
+            // Copy output to host for loss computation
             CUDA_CHECK(cudaMemcpy(h_output, d_output, BATCH_SIZE * OUTPUT_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
 
+            // Compute loss
             clock_gettime(CLOCK_MONOTONIC, &step_start);
             float loss = cross_entropy_loss(h_output, batch_labels, BATCH_SIZE);
             total_loss += loss;
             clock_gettime(CLOCK_MONOTONIC, &step_end);
             stats.cross_entropy += get_time_diff(step_start, step_end);
 
+            // Backward pass
             backward_timed(nn, d_input_batch, d_hidden, d_output, d_labels_batch, BATCH_SIZE, &stats);
 
+            // Weight update
             update_weights_timed(nn, &stats);
         }
 
@@ -505,6 +640,7 @@ void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
     clock_gettime(CLOCK_MONOTONIC, &total_end);
     stats.total_time = get_time_diff(total_start, total_end);
 
+    // Print timing statistics
     printf("\n=== CUDA GPU IMPLEMENTATION TIMING BREAKDOWN ===\n");
     printf("Total training time: %.1f seconds\n\n", stats.total_time);
 
@@ -517,6 +653,7 @@ void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
     printf("  Backward pass:    %6.3fs (%5.1f%%)\n", backward_pass, 100.0 * backward_pass / stats.total_time);
     printf("  Weight updates:   %6.3fs (%5.1f%%)\n", stats.weight_updates, 100.0 * stats.weight_updates / stats.total_time);
 
+    // Clean up device memory
     CUDA_CHECK(cudaFree(d_hidden));
     CUDA_CHECK(cudaFree(d_output));
     CUDA_CHECK(cudaFree(d_input_batch));
@@ -524,61 +661,84 @@ void train_timed(NeuralNetwork *nn, float *X_train, int *y_train) {
     free(h_output);
 }
 
+/**
+ * Initialize weights randomly on host and copy to device
+ * @param nn Pointer to neural network structure
+ */
 void initialize_random_weights(NeuralNetwork *nn) {
+    // Allocate host memory for weights
     float *h_weights1 = (float *)malloc(INPUT_SIZE * HIDDEN_SIZE * sizeof(float));
     float *h_weights2 = (float *)malloc(HIDDEN_SIZE * OUTPUT_SIZE * sizeof(float));
     float *h_bias1 = (float *)malloc(HIDDEN_SIZE * sizeof(float));
     float *h_bias2 = (float *)malloc(OUTPUT_SIZE * sizeof(float));
 
+    // Initialize weights and biases
     initialize_weights(h_weights1, INPUT_SIZE, HIDDEN_SIZE);
     initialize_weights(h_weights2, HIDDEN_SIZE, OUTPUT_SIZE);
     initialize_bias(h_bias1, HIDDEN_SIZE);
     initialize_bias(h_bias2, OUTPUT_SIZE);
 
+    // Copy to device
     CUDA_CHECK(cudaMemcpy(nn->weights1, h_weights1, INPUT_SIZE * HIDDEN_SIZE * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(nn->weights2, h_weights2, HIDDEN_SIZE * OUTPUT_SIZE * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(nn->bias1, h_bias1, HIDDEN_SIZE * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(nn->bias2, h_bias2, OUTPUT_SIZE * sizeof(float), cudaMemcpyHostToDevice));
 
+    // Free host memory
     free(h_weights1);
     free(h_weights2);
     free(h_bias1);
     free(h_bias2);
 }
 
+/**
+ * Initialize neural network structure
+ * Allocates device memory for all weights and gradients
+ * @param nn Pointer to neural network structure
+ */
 void initialize_neural_network(NeuralNetwork *nn) {
+    // Allocate device memory for weights and biases
     CUDA_CHECK(cudaMalloc(&nn->weights1, INPUT_SIZE * HIDDEN_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&nn->weights2, HIDDEN_SIZE * OUTPUT_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&nn->bias1, HIDDEN_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&nn->bias2, OUTPUT_SIZE * sizeof(float)));
+    // Allocate device memory for gradients
     CUDA_CHECK(cudaMalloc(&nn->grad_weights1, INPUT_SIZE * HIDDEN_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&nn->grad_weights2, HIDDEN_SIZE * OUTPUT_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&nn->grad_bias1, HIDDEN_SIZE * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&nn->grad_bias2, OUTPUT_SIZE * sizeof(float)));
 
+    // Initialize weights randomly
     initialize_random_weights(nn);
 }
 
 int main() {
     srand(time(NULL));  
 
+    // Initialize neural network
     NeuralNetwork nn;
     initialize_neural_network(&nn);
 
+    // Allocate host memory for training and test data
     float *X_train = (float *)malloc(TRAIN_SIZE * INPUT_SIZE * sizeof(float));
     int *y_train = (int *)malloc(TRAIN_SIZE * sizeof(int));
     float *X_test = (float *)malloc(TEST_SIZE * INPUT_SIZE * sizeof(float));
     int *y_test = (int *)malloc(TEST_SIZE * sizeof(int));
 
+    // Load and normalize training data
     load_data("./data/X_train.bin", X_train, TRAIN_SIZE * INPUT_SIZE);
     normalize_data(X_train, TRAIN_SIZE * INPUT_SIZE);
     load_labels("./data/y_train.bin", y_train, TRAIN_SIZE);
+    
+    // Load and normalize test data
     load_data("./data/X_test.bin", X_test, TEST_SIZE * INPUT_SIZE);
     normalize_data(X_test, TEST_SIZE * INPUT_SIZE);
     load_labels("./data/y_test.bin", y_test, TEST_SIZE);
 
+    // Train the network
     train_timed(&nn, X_train, y_train);
 
+    // Clean up device memory
     CUDA_CHECK(cudaFree(nn.weights1));
     CUDA_CHECK(cudaFree(nn.weights2));
     CUDA_CHECK(cudaFree(nn.bias1));
@@ -587,6 +747,8 @@ int main() {
     CUDA_CHECK(cudaFree(nn.grad_weights2));
     CUDA_CHECK(cudaFree(nn.grad_bias1));
     CUDA_CHECK(cudaFree(nn.grad_bias2));
+    
+    // Clean up host memory
     free(X_train);
     free(y_train);
     free(X_test);

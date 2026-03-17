@@ -44,4 +44,3 @@ make
 
 Educational materials for CUDA programming.
 
-

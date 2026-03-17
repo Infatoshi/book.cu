@@ -4,6 +4,9 @@
 # Compiler
 NVCC = nvcc
 
+OUT_DIR = out
+OUTPUT_FILE = -o $(OUT_DIR)/$@
+
 # Compiler flags
 NVCC_FLAGS = -O2 -I.
 
@@ -11,34 +14,38 @@ NVCC_FLAGS = -O2 -I.
 TARGETS = vector_add matrix_add transpose gemm softmax conv1d conv2d maxpool2d
 
 # Default target
-all: $(TARGETS)
+all: pre-build $(TARGETS)
+
+pre-build:
+	@echo "pre build"
+	mkdir -p $(OUT_DIR)
 
 # Element-wise operations
-vector_add: elementwise/vector_add.cu common.h
-	$(NVCC) $(NVCC_FLAGS) elementwise/vector_add.cu -o vector_add
+vector_add: pre-build elementwise/vector_add.cu common.h
+	$(NVCC) $(NVCC_FLAGS) elementwise/vector_add.cu $(OUTPUT_FILE)
 
-matrix_add: elementwise/matrix_add.cu common.h
-	$(NVCC) $(NVCC_FLAGS) elementwise/matrix_add.cu -o matrix_add
+matrix_add: pre-build elementwise/matrix_add.cu common.h
+	$(NVCC) $(NVCC_FLAGS) elementwise/matrix_add.cu $(OUTPUT_FILE)
 
 # Matrix operations
-transpose: transpose/transpose.cu common.h
-	$(NVCC) $(NVCC_FLAGS) transpose/transpose.cu -o transpose
+transpose: pre-build transpose/transpose.cu common.h
+	$(NVCC) $(NVCC_FLAGS) transpose/transpose.cu $(OUTPUT_FILE)
 
-gemm: gemm/gemm.cu common.h
-	$(NVCC) $(NVCC_FLAGS) gemm/gemm.cu -o gemm
+gemm: pre-build gemm/gemm.cu common.h
+	$(NVCC) $(NVCC_FLAGS) gemm/gemm.cu $(OUTPUT_FILE)
 
 # Neural network operations
-softmax: softmax/softmax.cu common.h
-	$(NVCC) $(NVCC_FLAGS) softmax/softmax.cu -o softmax
+softmax: pre-build softmax/softmax.cu common.h
+	$(NVCC) $(NVCC_FLAGS) softmax/softmax.cu $(OUTPUT_FILE)
 
-conv1d: conv1d/conv1d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) conv1d/conv1d.cu -o conv1d
+conv1d: pre-build conv1d/conv1d.cu common.h
+	$(NVCC) $(NVCC_FLAGS) conv1d/conv1d.cu $(OUTPUT_FILE)
 
-conv2d: conv2d/conv2d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) conv2d/conv2d.cu -o conv2d
+conv2d: pre-build conv2d/conv2d.cu common.h
+	$(NVCC) $(NVCC_FLAGS) conv2d/conv2d.cu $(OUTPUT_FILE)
 
-maxpool2d: maxpool2d/maxpool2d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) maxpool2d/maxpool2d.cu -o maxpool2d
+maxpool2d: pre-build maxpool2d/maxpool2d.cu common.h
+	$(NVCC) $(NVCC_FLAGS) maxpool2d/maxpool2d.cu $(OUTPUT_FILE)
 
 # Build and run all examples
 run: all

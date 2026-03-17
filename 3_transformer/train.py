@@ -1,3 +1,71 @@
+"""
+Transformer Training Script with Custom CUDA Kernels
+
+This script demonstrates training a character-level transformer using custom CUDA kernels
+integrated with PyTorch's autograd system. It trains on "The Wonderful Wizard of Oz"
+text dataset and compares PyTorch baseline with custom CUDA implementation.
+
+Architecture Overview:
+    - Character-level GPT-style transformer
+    - Multi-head self-attention with causal masking
+    - Feed-forward networks with GELU activation
+    - Layer normalization before attention and feed-forward layers
+    - Embedding layers for token and position encodings
+
+Key Components:
+    1. PytorchTransformer: Baseline PyTorch implementation
+       - Standard PyTorch operations for all layers
+       - Used as reference for correctness verification
+       - Provides ground truth for numerical accuracy comparisons
+    
+    2. CustomTransformer: Custom CUDA kernel implementation
+       - Uses custom CUDA kernels from wrapper.training modules
+       - Integrates with PyTorch's autograd system via Function classes
+       - Implements forward and backward passes for training
+       - Matches PyTorch implementation numerically (within tolerance)
+
+Custom CUDA Operations Used:
+    - Embedding: Token and position embedding lookup with gradient accumulation
+    - MatMul: Matrix multiplication for attention and feed-forward layers
+    - BatchedMatMul: Batched matrix multiplication for attention heads
+    - LayerNorm: Layer normalization with learnable scale/shift parameters
+    - Softmax: Attention weight computation with numerical stability
+    - GELU: Activation function for feed-forward networks
+    - Add/Mul: Element-wise operations for residual connections
+
+Training Process:
+    1. Data Loading: Downloads and processes "The Wonderful Wizard of Oz" text
+    2. Tokenization: Character-level tokenization (vocab size ~80 characters)
+    3. Batch Generation: Random sampling of context windows from training data
+    4. Forward Pass: Compute logits and cross-entropy loss
+    5. Backward Pass: Compute gradients using custom CUDA backward kernels
+    6. Optimization: AdamW optimizer updates model parameters
+
+Model Architecture:
+    - Embedding dimension: 128
+    - Number of attention heads: 4
+    - Number of transformer layers: 8
+    - Feed-forward expansion: 4x (128 -> 512 -> 128)
+    - Vocabulary size: ~80 (character-level)
+    - Total parameters: ~1.6M
+
+Training Configuration:
+    - Batch size: 16
+    - Sequence length: 64
+    - Learning rate: 3e-4
+    - Optimizer: AdamW
+    - Training iterations: 1000
+
+Verification:
+    - Compares PyTorch and custom CUDA implementations
+    - Checks numerical accuracy (loss differences, logit differences)
+    - Verifies prediction match rate
+    - Reports training time comparison
+
+Usage:
+    python train.py
+"""
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -34,13 +102,22 @@ def download_file(url, filename):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-dataset_url = "https:
+vocab_url = "https://github.com/Infatoshi/fcc-intro-to-llms/raw/refs/heads/main/vocab.txt"
+vocab_filename = "vocab.txt"
+
+if not os.path.exists(vocab_filename):
+    download_file(vocab_url, vocab_filename)
+else:
+    print(f"{vocab_filename} already exists, skipping download.")
+
+dataset_url = "https://github.com/Infatoshi/fcc-intro-to-llms/raw/refs/heads/main/wizard_of_oz.txt"
 dataset_filename = "wizard_of_oz.txt"
 
 if not os.path.exists(dataset_filename):
     download_file(dataset_url, dataset_filename)
 else:
     print(f"{dataset_filename} already exists, skipping download.")
+
 with open('wizard_of_oz.txt', 'r', encoding='utf-8') as f:
     text = f.read()
 

@@ -1,4 +1,28 @@
 
+/**
+ * @file wgmma_larger_tiles_fp16.cuh
+ * @brief WGMMA GEMM implementation with larger block tiles (128×128×64)
+ * 
+ * This implementation extends the basic WGMMA kernel by using larger block tiles
+ * to improve memory bandwidth utilization and reduce synchronization overhead.
+ * 
+ * Key Differences from Basic WGMMA:
+ * - **Larger block tiles**: 128×128×64 (vs 64×64×64)
+ * - **Multiple WGMMA tile sizes**: Supports 32, 64, 128, 192, and 256 in N dimension
+ * - **Better throughput**: Larger tiles reduce global memory traffic per computation
+ * - **Multiple warp groups**: Can use multiple warp groups per block for better parallelism
+ * 
+ * WGMMA Tile Size Selection:
+ * - WGMMA supports different output tile sizes: m64n{16,32,64,128,192,256}k16
+ * - Larger N dimensions increase register pressure but improve compute efficiency
+ * - This kernel uses variable WGMMA_N based on block configuration
+ * 
+ * Performance Characteristics:
+ * - Better memory bandwidth utilization due to larger tiles
+ * - Reduced synchronization overhead (fewer iterations over K dimension)
+ * - Higher register pressure may limit occupancy
+ * - Best for larger matrices where memory bandwidth is the bottleneck
+ */
 
 namespace WGMMA_LargerTiles_fp16 {
 
@@ -66,6 +90,20 @@ __host__ static inline CUtensorMap* allocate_and_create_tensor_map(fp16* src, in
     return tma_map_d;
 }
 
+/**
+ * @brief Performs WGMMA operation: 64x256x16 matrix multiply-accumulate
+ * @tparam ScaleD Scale factor for accumulator
+ * @tparam ScaleA Scale factor for matrix A
+ * @tparam ScaleB Scale factor for matrix B
+ * @tparam TransA Whether to transpose A
+ * @tparam TransB Whether to transpose B
+ * @param d Accumulator register array [16][8] storing FP32 results (64×256 output)
+ * @param sA Pointer to matrix A tile in shared memory (64×16 FP16)
+ * @param sB Pointer to matrix B tile in shared memory (256×16 FP16, column-major)
+ * 
+ * This is the largest WGMMA tile size supported, processing 64×256 output per operation.
+ * Requires more registers (16×8 = 128 FP32 values) but maximizes Tensor Core utilization.
+ */
 template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ void wgmma256(float d[16][8], fp16* sA, fp16* sB) {
     uint64_t desc_a = make_smem_desc(&sA[0]);
@@ -113,6 +151,14 @@ __device__ void wgmma256(float d[16][8], fp16* sA, fp16* sB) {
             "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 }
 
+/**
+ * @brief Performs WGMMA operation: 64x128x16 matrix multiply-accumulate
+ * @param d Accumulator register array [8][8] storing FP32 results (64×128 output)
+ * @param sA Pointer to matrix A tile (64×16 FP16)
+ * @param sB Pointer to matrix B tile (128×16 FP16, column-major)
+ * 
+ * Medium-sized WGMMA tile, balancing register usage and throughput.
+ */
 template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ void wgmma128(float d[8][8], fp16* sA, fp16* sB) {
     uint64_t desc_a = make_smem_desc(&sA[0]);
@@ -147,6 +193,14 @@ __device__ void wgmma128(float d[8][8], fp16* sA, fp16* sB) {
             "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 }
 
+/**
+ * @brief Performs WGMMA operation: 64x192x16 matrix multiply-accumulate
+ * @param d Accumulator register array [12][8] storing FP32 results (64×192 output)
+ * @param sA Pointer to matrix A tile (64×16 FP16)
+ * @param sB Pointer to matrix B tile (192×16 FP16, column-major)
+ * 
+ * Intermediate tile size between 128 and 256, useful for specific block configurations.
+ */
 template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ __forceinline__ void wgmma192(float d[12][8], fp16* sA, fp16* sB) {
     uint64_t desc_a = make_smem_desc(&sA[0]);
@@ -186,6 +240,14 @@ __device__ __forceinline__ void wgmma192(float d[12][8], fp16* sA, fp16* sB) {
             "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 }
 
+/**
+ * @brief Performs WGMMA operation: 64x64x16 matrix multiply-accumulate
+ * @param d Accumulator register array [4][8] storing FP32 results (64×64 output)
+ * @param sA Pointer to matrix A tile (64×16 FP16)
+ * @param sB Pointer to matrix B tile (64×16 FP16, column-major)
+ * 
+ * Same as basic WGMMA kernel - standard 64×64 output tile.
+ */
 template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ void wgmma64(float d[4][8], fp16* sA, fp16* sB) {
     uint64_t desc_a = make_smem_desc(&sA[0]);
@@ -211,6 +273,14 @@ __device__ void wgmma64(float d[4][8], fp16* sA, fp16* sB) {
             "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 }
 
+/**
+ * @brief Performs WGMMA operation: 64x32x16 matrix multiply-accumulate
+ * @param d Accumulator register array [2][8] storing FP32 results (64×32 output)
+ * @param sA Pointer to matrix A tile (64×16 FP16)
+ * @param sB Pointer to matrix B tile (32×16 FP16, column-major)
+ * 
+ * Smaller tile size, uses fewer registers. Useful when register pressure is high.
+ */
 template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ void wgmma32(float d[2][8], fp16* sA, fp16* sB) {
     uint64_t desc_a = make_smem_desc(&sA[0]);
@@ -231,6 +301,14 @@ __device__ void wgmma32(float d[2][8], fp16* sA, fp16* sB) {
             "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 }
 
+/**
+ * @brief Performs WGMMA operation: 64x16x16 matrix multiply-accumulate
+ * @param d Accumulator register array [1][8] storing FP32 results (64×16 output)
+ * @param sA Pointer to matrix A tile (64×16 FP16)
+ * @param sB Pointer to matrix B tile (16×16 FP16, column-major)
+ * 
+ * Smallest WGMMA tile size, minimizes register usage.
+ */
 template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ void wgmma16(float d[1][8], fp16* sA, fp16* sB) {
     uint64_t desc_a = make_smem_desc(&sA[0]);
@@ -249,6 +327,17 @@ __device__ void wgmma16(float d[1][8], fp16* sA, fp16* sB) {
             "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 }
 
+/**
+ * @brief Template wrapper to select appropriate WGMMA tile size
+ * @tparam WGMMA_N N dimension of WGMMA operation (32, 64, 128, 192, or 256)
+ * @param d Accumulator array sized appropriately for WGMMA_N
+ * @param sA Pointer to matrix A tile in shared memory
+ * @param sB Pointer to matrix B tile in shared memory
+ * 
+ * This template function dispatches to the appropriate WGMMA implementation
+ * based on the WGMMA_N template parameter. Allows compile-time selection of
+ * optimal tile size based on block configuration and register availability.
+ */
 template<int WGMMA_N, int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
 __device__ inline void wgmma(float d[WGMMA_N/16][8], fp16* sA, fp16* sB) {
     static_assert(WGMMA_N == 32 || WGMMA_N == 64 || WGMMA_N == 128 || WGMMA_N == 192 || WGMMA_N == 256);
@@ -270,6 +359,32 @@ struct SMem {
     alignas(128) fp16 B[BK*BN];
 };
 
+/**
+ * @brief GEMM kernel with larger tiles and multiple warp groups
+ * @tparam BM Block tile size in M dimension (128)
+ * @tparam BN Block tile size in N dimension (128)
+ * @tparam BK Block tile size in K dimension (64)
+ * @tparam NUM_THREADS Number of threads per block (128 = 1 warp group)
+ * @tparam DBG Whether to collect debug timing information
+ * @param M Number of rows in matrices A and C
+ * @param N Number of columns in matrices B and C
+ * @param K Number of columns in A and rows in B
+ * @param C Output matrix C (M×N, FP16, device memory, column-major)
+ * @param tensorMapA TMA descriptor for matrix A
+ * @param tensorMapB TMA descriptor for matrix B
+ * @param DB Debug buffer for timing data (if DBG=true)
+ * 
+ * This kernel uses larger block tiles (128×128×64) compared to the basic kernel.
+ * The larger tiles improve memory bandwidth utilization by:
+ * - Reducing global memory accesses per computation
+ * - Better L2 cache utilization
+ * - Fewer synchronization barriers
+ * 
+ * Key features:
+ * - Uses dynamic shared memory for tile buffers
+ * - Supports optional debug timing collection
+ * - Variable WGMMA_N based on block configuration
+ */
 template<int BM, int BN, int BK, int NUM_THREADS, bool DBG>
 __global__ void __launch_bounds__(NUM_THREADS) matmulKernel3(int M, int N, int K, fp16* C, const CUtensorMap* tensorMapA, const CUtensorMap* tensorMapB, int *DB) {
     constexpr int WGMMA_M = 64, WGMMA_K = 16, WGMMA_N=BN;

@@ -1,4 +1,11 @@
 
+/**
+ * @file 11_wgmma_async_loads.cuh
+ * @brief Wrapper interface for pipelined WGMMA GEMM with async loads
+ * 
+ * Provides interface to the async loads implementation that uses producer-consumer
+ * pattern to overlap memory operations with computation.
+ */
 
 namespace wgmma_k11 {
 

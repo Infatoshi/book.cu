@@ -1,6 +1,34 @@
 
-
-namespace WGMMA_AsyncLoads_fp16 {
+/**
+ * @file wgmma_async_loads_fp16.cuh
+ * @brief WGMMA GEMM implementation with asynchronous data loading pipeline
+ * 
+ * This implementation demonstrates advanced optimization techniques for overlapping
+ * computation with memory operations using a producer-consumer pattern with multiple
+ * shared memory buffers.
+ * 
+ * Key Features:
+ * - **Double-buffering/Pipeline**: Uses multiple shared memory buffers (QSIZE=5)
+ * - **Producer-Consumer Pattern**: Dedicated warp group for loading, others for computation
+ * - **Asynchronous Execution**: Memory loads and WGMMA operations overlap
+ * - **Register Allocation**: Dynamic register allocation for optimal resource usage
+ * 
+ * Pipeline Architecture:
+ * - Warp group 0: Producer (loads data from global memory via TMA)
+ * - Warp groups 1+: Consumers (perform WGMMA computation)
+ * - Multiple shared memory buffers allow loading next tile while computing current tile
+ * 
+ * Benefits:
+ * - Hides memory latency by overlapping loads with computation
+ * - Maximizes Tensor Core utilization
+ * - Better memory bandwidth utilization
+ * - Can achieve near-peak performance for large matrices
+ * 
+ * Memory Layout:
+ * - Shared memory is divided into QSIZE buffers for A and B tiles
+ * - Each buffer is BM×BK (for A) or BK×BN (for B)
+ * - Circular buffer pattern: load into buffer[i], compute from buffer[i-1]
+ */
 
 using fp16 = __half;
 
@@ -265,12 +293,51 @@ __device__ __forceinline__ void wgmma(float d[WGMMA_N/16][8], fp16* sA, fp16* sB
         wgmma32<1, 1, 1, 0, 0>(d, sA, sB);
 }
 
+/**
+ * @brief Shared memory structure for pipelined GEMM
+ * @tparam BM Block tile size in M dimension
+ * @tparam BN Block tile size in N dimension
+ * @tparam BK Block tile size in K dimension
+ * @tparam QSIZE Number of shared memory buffers (queue size)
+ * 
+ * Allocates QSIZE copies of each tile buffer to enable pipelined execution.
+ * While one buffer is being used for computation, others can be loaded asynchronously.
+ */
 template <int BM, int BN, int BK, int QSIZE>
 struct SMem {
-    alignas(128) fp16 A[BM*BK*QSIZE];
-    alignas(128) fp16 B[BK*BN*QSIZE];
+    alignas(128) fp16 A[BM*BK*QSIZE];  // QSIZE buffers for A tiles
+    alignas(128) fp16 B[BK*BN*QSIZE];  // QSIZE buffers for B tiles
 };
 
+/**
+ * @brief Pipelined GEMM kernel with asynchronous data loading
+ * @tparam BM Block tile size in M dimension (128)
+ * @tparam BN Block tile size in N dimension (128)
+ * @tparam BK Block tile size in K dimension (64)
+ * @tparam NUM_THREADS Number of threads per block (256 = 2 warp groups)
+ * @tparam QSIZE Number of shared memory buffers for pipelining (5)
+ * 
+ * This kernel implements a producer-consumer pattern:
+ * 
+ * Producer (warp group 0):
+ * - Thread 0 initiates TMA async loads
+ * - Loads data into circular buffer
+ * - Signals consumers when data is ready
+ * 
+ * Consumers (warp groups 1+):
+ * - Wait for data to be ready
+ * - Perform WGMMA computation
+ * - Signal producer when buffer can be reused
+ * 
+ * Pipeline stages:
+ * 1. Producer loads tile[i] into buffer[qidx]
+ * 2. Consumer computes using buffer[qidx]
+ * 3. Producer loads tile[i+1] into buffer[(qidx+1)%QSIZE]
+ * 4. Consumer computes using buffer[(qidx+1)%QSIZE]
+ * 5. Repeat with circular buffer indexing
+ * 
+ * This achieves optimal overlap of memory operations and computation.
+ */
 template<int BM, int BN, int BK, int NUM_THREADS, int QSIZE>
 __global__  __launch_bounds__(NUM_THREADS) void  matmulKernel4(int M, int N, int K, fp16* C, const CUtensorMap* tensorMapA, const CUtensorMap* tensorMapB) {
     constexpr int WGMMA_M = 64, WGMMA_K = 16, WGMMA_N=BN;

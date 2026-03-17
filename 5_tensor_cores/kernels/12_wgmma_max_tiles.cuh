@@ -1,4 +1,11 @@
 
+/**
+ * @file 12_wgmma_max_tiles.cuh
+ * @brief Wrapper interface for WGMMA GEMM with maximum tile sizes
+ * 
+ * Provides interface to the maximum tiles implementation (128×256×64 blocks).
+ * Uses the largest supported WGMMA tile sizes for maximum throughput.
+ */
 
 namespace wgmma_k12 {
 

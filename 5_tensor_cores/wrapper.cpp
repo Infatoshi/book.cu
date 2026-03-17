@@ -1,5 +1,20 @@
-
-void runKernel7(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
+/**
+ * @file wrapper.cpp
+ * @brief PyTorch bindings for Tensor Core GEMM kernels
+ * 
+ * Provides Python interface for all GEMM kernel implementations using Pybind11.
+ * Handles input validation, tensor type conversion, and result tensor creation.
+ * 
+ * Exposed Functions:
+ * - kernel_7: cuBLAS with Tensor Cores
+ * - kernel_8: WMMA Tensor Cores
+ * - kernel_9: WGMMA Basic
+ * - kernel_10: WGMMA Larger Tiles
+ * - kernel_11: WGMMA Async Loads
+ * - kernel_12: WGMMA Max Tiles
+ * 
+ * Each function also has a "_raw" variant that accepts raw pointers for advanced use cases.
+ */
 void runKernel8(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
 void runKernel9(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
 void runKernel10(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
@@ -13,6 +28,18 @@ void kernel_10_raw(int M, int N, int K, uint64_t A_ptr, uint64_t B_ptr, uint64_t
 void kernel_11_raw(int M, int N, int K, uint64_t A_ptr, uint64_t B_ptr, uint64_t C_ptr, uint64_t DB_ptr = 0);
 void kernel_12_raw(int M, int N, int K, uint64_t A_ptr, uint64_t B_ptr, uint64_t C_ptr, uint64_t DB_ptr = 0);
 
+/**
+ * @brief Validates input tensors for GEMM operations
+ * @param A Input matrix A
+ * @param B Input matrix B
+ * 
+ * Checks that:
+ * - Tensors are on CUDA device
+ * - Data type is FP16 (Float16)
+ * - Tensors are contiguous in memory
+ * 
+ * Throws exceptions if validation fails.
+ */
 void validate_inputs(torch::Tensor A, torch::Tensor B) {
     TORCH_CHECK(A.is_cuda(), "A must be a CUDA tensor");
     TORCH_CHECK(B.is_cuda(), "B must be a CUDA tensor");
