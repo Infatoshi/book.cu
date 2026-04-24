@@ -4,7 +4,9 @@ Warp-parallel TopK kernel
 Uses warp-level primitives to find top K elements in parallel
 Each iteration finds the max across all threads using warp reduction
 */
+#include "common.h"
 
+#define CUDA_CHECK(call) do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
@@ -12,7 +14,6 @@ Each iteration finds the max across all threads using warp reduction
         exit(EXIT_FAILURE); \
     } \
 } while (0)
-
 
 __device__ __forceinline__ ValueIndex warp_reduce_max_with_idx(ValueIndex val) {
     
