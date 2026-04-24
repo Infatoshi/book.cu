@@ -2,6 +2,8 @@
  * CUDA error checking macro
  * Checks CUDA function calls for errors and exits on failure
  */
+#include "common.h"
+
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
