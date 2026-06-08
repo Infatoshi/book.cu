@@ -1,3 +1,10 @@
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdint.h>
+
 /**
  * @file fp32_int4.cu
  * @brief Demonstrates FP32 to INT4 quantization and dequantization with bit-packing.

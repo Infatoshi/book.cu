@@ -1,3 +1,10 @@
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdint.h>
+
 /**
  * @file int8_uint8.cu
  * @brief Compares symmetric (INT8) and asymmetric (UINT8) quantization in CUDA.

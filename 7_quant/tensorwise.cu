@@ -1,3 +1,10 @@
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdint.h>
+
 /**
  * @file tensorwise.cu
  * @brief Demonstrates tensor-wise symmetric quantization for CUDA.
