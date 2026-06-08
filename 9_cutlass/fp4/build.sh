@@ -35,9 +35,12 @@ echo "=========================================================="
 if [ ! -d "cutlass" ]; then
     echo "Cloning the official NVIDIA CUTLASS repository..."
     git clone https://github.com/NVIDIA/cutlass.git
-    # Note: For production use, you might want to check out a specific
-    # stable release tag instead of using the main branch.
-    # cd cutlass && git checkout v3.6.0 && cd ..
+    # Pin to a known-good release. CUTLASS main and the v4.5.x tags introduced a
+    # subbyte_reference.h change (commit cb37157d) that fails to compile against
+    # the CUDA 12.8/13.x __nv_atomic_load_n intrinsic. v4.4.2 still contains
+    # example 72a and builds cleanly. Verified: v4.4.2 + CUDA 12.8 toolkit,
+    # arch sm_100a (Blackwell B200).
+    cd cutlass && git checkout v4.4.2 && cd ..
 else
     echo "CUTLASS repository already exists. Skipping clone."
 fi
