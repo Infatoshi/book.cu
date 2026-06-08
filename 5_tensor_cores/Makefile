@@ -7,7 +7,12 @@ NCU_PATH := $(shell which ncu)
 NCU_COMMAND = sudo $(NCU_PATH) --set full --import-source yes
 
 NVCC_FLAGS += --expt-relaxed-constexpr --expt-extended-lambda --use_fast_math -Xcompiler=-fPIE -Xcompiler=-Wno-psabi -Xcompiler=-fno-strict-aliasing
-NVCC_FLAGS += -arch=sm_90a
+
+# Target GPU architecture. These WGMMA kernels require Hopper (sm_90a, e.g. H100)
+# and will not run on Ampere, Ada, or Blackwell. Override on the command line if
+# needed, e.g. `make ARCH=sm_90`.
+ARCH ?= sm_90a
+NVCC_FLAGS += -arch=$(ARCH)
 
 NVCC_BASE = nvcc $(NVCC_FLAGS) $(NVCC_LDFLAGS) -lineinfo
 
