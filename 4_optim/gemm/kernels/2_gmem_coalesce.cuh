@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 /**
  * @file 2_gmem_coalesce.cuh
  * @brief GEMM kernel with global memory coalescing optimization

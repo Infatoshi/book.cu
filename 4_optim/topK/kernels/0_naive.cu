@@ -1,3 +1,7 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+
 /**
  * CUDA error checking macro
  * Checks CUDA function calls for errors and exits on failure

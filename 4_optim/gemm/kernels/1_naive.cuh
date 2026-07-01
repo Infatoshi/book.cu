@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 /**
  * @file 1_naive.cuh
  * @brief Naive GEMM kernel implementation - baseline for optimization comparison

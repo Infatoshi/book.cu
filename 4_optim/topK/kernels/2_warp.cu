@@ -1,3 +1,8 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include "common.h"
+
 
 /*
 Warp-parallel TopK kernel
@@ -5,6 +10,8 @@ Uses warp-level primitives to find top K elements in parallel
 Each iteration finds the max across all threads using warp reduction
 */
 
+#define CUDA_CHECK(call) \
+    do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \

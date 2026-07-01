@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 /**
  * @file 3_smem_blocking.cuh
  * @brief GEMM kernel with shared memory blocking/tiling optimization

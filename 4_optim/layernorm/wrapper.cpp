@@ -1,3 +1,5 @@
+#include <torch/extension.h>
+
 
 void run_kernel_0(float* out, float* mean, float* rstd, const float* inp, 
                   const float* weight, const float* bias, int N, int C);

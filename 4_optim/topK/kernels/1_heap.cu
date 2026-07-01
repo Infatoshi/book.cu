@@ -1,3 +1,8 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include "common.h"
+
 
 /*
 Heap-based TopK kernel
@@ -5,6 +10,8 @@ Uses a min-heap of size K to track top K elements
 More efficient than naive selection: O(N log K) vs O(NK)
 */
 
+#define CUDA_CHECK(call) \
+    do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \

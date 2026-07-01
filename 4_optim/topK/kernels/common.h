@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 
 
 struct ValueIndex {

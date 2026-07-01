@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 /**
  * @file 4_1d_blocktiling.cuh
  * @brief GEMM kernel with 1D block tiling and register blocking optimization

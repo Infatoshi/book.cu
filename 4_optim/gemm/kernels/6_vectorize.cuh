@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 /**
  * @file 6_vectorize.cuh
  * @brief GEMM kernel with vectorized memory access optimization

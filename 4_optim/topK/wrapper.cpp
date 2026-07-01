@@ -1,3 +1,6 @@
+#include <torch/extension.h>
+#include <tuple>
+
 
 void run_kernel_0(float* input, int* indices, float* values, int N, int K);
 void run_kernel_1(float* input, int* indices, float* values, int N, int K);

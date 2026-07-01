@@ -1,3 +1,8 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+
 /**
  * @file 1_parallel.cu
  * @brief Parallel LayerNorm kernel using thread coarsening and shared memory reductions

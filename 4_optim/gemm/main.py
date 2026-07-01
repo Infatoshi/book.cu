@@ -20,7 +20,7 @@ print("\n[1/3] Compiling extension...")
 kernels = load(
     name='gemm_kernels_raw_bench',
     sources=['wrapper.cpp', 'kernels/all_kernels.cu'],
-    extra_cuda_cflags=['-std=c++20', '-gencode=arch=compute_90a,code=sm_90a', '-O3'],
+    extra_cuda_cflags=['-std=c++20', '-gencode=arch=compute_86,code=sm_86', '-O3'],
     extra_ldflags=['-lcublas', '-lcuda'],
     verbose=False,
 )
@@ -52,11 +52,6 @@ KERNELS = [
     ("kernel_4_raw", kernels.kernel_4_raw, rowmajor_ptrs, False),
     ("kernel_5_raw", kernels.kernel_5_raw, rowmajor_ptrs, False),
     ("kernel_6_raw", kernels.kernel_6_raw, rowmajor_ptrs, False),
-    ("kernel_7_raw", kernels.kernel_7_raw, rowmajor_ptrs, False),
-    ("kernel_8_raw", kernels.kernel_8_raw, colmajor_ptrs, True),
-    ("kernel_9_raw", kernels.kernel_9_raw, colmajor_ptrs, True),
-    ("kernel_10_raw", kernels.kernel_10_raw, colmajor_ptrs, True),
-    ("kernel_11_raw", kernels.kernel_11_raw, colmajor_ptrs, True),
 ]
 
 def benchmark_kernel(func, args, uses_col_layout=False):
@@ -122,17 +117,12 @@ fig.suptitle(f'Hopper GEMM Kernels Throughput (M=N=K={M})', fontsize=20, fontwei
 
 colors = {
     'kernel_0_raw': 'black',
-    'kernel_1_raw': '
-    'kernel_2_raw': '
-    'kernel_3_raw': '
-    'kernel_4_raw': '
-    'kernel_5_raw': '
-    'kernel_6_raw': '
-    'kernel_7_raw': '
-    'kernel_8_raw': '
-    'kernel_9_raw': '
-    'kernel_10_raw': '
-    'kernel_11_raw': '
+    'kernel_1_raw': '#1f77b4',
+    'kernel_2_raw': '#ff7f0e',
+    'kernel_3_raw': '#2ca02c',
+    'kernel_4_raw': '#d62728',
+    'kernel_5_raw': '#9467bd',
+    'kernel_6_raw': '#8c564b',
 }
 
 kernel_names = [r[0] for r in results]
@@ -163,9 +153,9 @@ print(f"✓ Performance plots saved to: {output_file}")
 
 print("\n" + "=" * 80)
 print("Analysis Complete!")
-print(f"Best Custom Kernel: K11 (WGMMA Max Tiles) = {kernel_tflops[11]:.1f} TFLOPS")
+print(f"Best Custom Kernel: K6 (Vectorized Memory Access) = {kernel_tflops[6]:.1f} TFLOPS")
 print(f"cuBLAS Baseline: K0 = {kernel_tflops[0]:.1f} TFLOPS")
-print(f"Efficiency: {(kernel_tflops[11]/kernel_tflops[0]*100):.1f}% of cuBLAS")
-print(f"Speedup vs Naive: {(kernel_times[1]/kernel_times[11]):.0f}x")
+print(f"Efficiency: {(kernel_tflops[6]/kernel_tflops[0]*100):.1f}% of cuBLAS")
+print(f"Speedup vs Naive: {(kernel_times[1]/kernel_times[6]):.0f}x")
 print("=" * 80)
 

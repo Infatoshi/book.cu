@@ -1,3 +1,5 @@
+#include <cuda_runtime.h>
+
 
 /**
  * CUBLAS GEMM implementation using BF16 precision

@@ -1,3 +1,9 @@
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+#define WARP_SIZE 32
+
 
 /*
 Warp-optimized LayerNorm kernel (kernel3 from llm.c)
@@ -7,6 +13,8 @@ One warp processes one row
 Based on llm.c/llmc/layernorm.cuh kernel3
 */
 
+#define CUDA_CHECK(call) \
+    do { \
     cudaError_t err = call; \
     if (err != cudaSuccess) { \
         fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
