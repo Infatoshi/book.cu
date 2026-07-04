@@ -1,3 +1,7 @@
+#include <cuda_runtime.h>
+
+#pragma once
+
 
 /**
  * @file layout_utils.cuh

@@ -1,3 +1,12 @@
+#include <torch/extension.h>
+#include "all_kernels.cuh"
+#include "7_cublas_tc.cuh"
+#include "8_wmma.cuh"
+#include "9_wgmma.cuh"
+#include "10_wgmma_larger_tiles.cuh"
+#include "11_wgmma_async_loads.cuh"
+#include "12_wgmma_max_tiles.cuh"
+
 /**
  * @file all_kernels.cu
  * @brief Implementation file for kernel launcher functions

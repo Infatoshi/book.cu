@@ -1,3 +1,5 @@
+#include <torch/extension.h>
+
 /**
  * @file wrapper.cpp
  * @brief PyTorch bindings for Tensor Core GEMM kernels
@@ -15,6 +17,7 @@
  * 
  * Each function also has a "_raw" variant that accepts raw pointers for advanced use cases.
  */
+void runKernel7(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
 void runKernel8(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
 void runKernel9(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);
 void runKernel10(int M, int N, int K, at::Half *A, at::Half *B, at::Half *C, int *DB);

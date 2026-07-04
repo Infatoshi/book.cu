@@ -1,3 +1,7 @@
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda/barrier>
+
 
 /**
  * @file wgmma_max_tiles_fp16.cuh
@@ -26,7 +30,11 @@
  * - Higher register pressure requires careful tuning
  */
 
+namespace WGMMA_MaxTiles_fp16 {
+
 using fp16 = __half;
+
+#define IDX(row, col) ((col) * M + (row))
 
 using barrier = cuda::barrier<cuda::thread_scope_block>;
 namespace cde = cuda::device::experimental;
@@ -423,15 +431,15 @@ __global__  __launch_bounds__(NUM_THREADS) void  matmulKernel5(int M, int N, int
                 int col = 16*w + 2*(tid % 4);
                 
 
-                block_C[IDX(row, col)] = __float2half(d[m_it][w][0]);
-                block_C[IDX(row, col+1)] = __float2half(d[m_it][w][1]);
-                block_C[IDX(row+8, col)] = __float2half(d[m_it][w][2]);
-                block_C[IDX(row+8, col+1)] = __float2half(d[m_it][w][3]);
+                block_C[IDX(yo + row, col)] = __float2half(d[m_it][w][0]);
+                block_C[IDX(yo + row, col+1)] = __float2half(d[m_it][w][1]);
+                block_C[IDX(yo + row+8, col)] = __float2half(d[m_it][w][2]);
+                block_C[IDX(yo + row+8, col+1)] = __float2half(d[m_it][w][3]);
 
-                block_C[IDX(row, col+8)] = __float2half(d[m_it][w][4]);
-                block_C[IDX(row, col+9)] = __float2half(d[m_it][w][5]);
-                block_C[IDX(row+8, col+8)] = __float2half(d[m_it][w][6]);
-                block_C[IDX(row+8, col+9)] = __float2half(d[m_it][w][7]);
+                block_C[IDX(yo + row, col+8)] = __float2half(d[m_it][w][4]);
+                block_C[IDX(yo + row, col+9)] = __float2half(d[m_it][w][5]);
+                block_C[IDX(yo + row+8, col+8)] = __float2half(d[m_it][w][6]);
+                block_C[IDX(yo + row+8, col+9)] = __float2half(d[m_it][w][7]);
                 
             }
         }

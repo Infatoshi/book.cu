@@ -1,3 +1,7 @@
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda/barrier>
+
 /**
  * @file wgmma_basic_fp16.cuh
  * @brief Basic WGMMA (Warp-Group Matrix-Multiply-Accumulate) GEMM implementation using Tensor Cores

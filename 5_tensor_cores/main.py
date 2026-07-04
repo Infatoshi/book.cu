@@ -37,7 +37,7 @@ print("✓ Compilation complete")
 M, N, K = 4096, 4096, 4096
 NUM_WARMUP = 5
 NUM_ITERS = 20
-TorchDevice = torch::device('cuda')
+TorchDevice = torch.device('cuda')
 
 print(f"\n[2/3] Preparing inputs (M=N=K={M})...")
 A = torch.randn(M, K, device=TorchDevice, dtype=torch.float16)
@@ -122,12 +122,12 @@ fig, ax = plt.subplots(1, 1, figsize=(14, 8))
 fig.suptitle(f'Tensor Core GEMM Performance (M=N=K={M})', fontsize=20, fontweight='bold')
 
 colors = {
-    'kernel_7_raw': 'black',      
-    'kernel_8_raw': '
-    'kernel_9_raw': '
-    'kernel_10_raw': '
-    'kernel_11_raw': '
-    'kernel_12_raw': '
+    'kernel_7_raw': 'black',
+    'kernel_8_raw': '#1f77b4',
+    'kernel_9_raw': '#ff7f0e',
+    'kernel_10_raw': '#2ca02c',
+    'kernel_11_raw': '#d62728',
+    'kernel_12_raw': '#9467bd',
 }
 
 kernel_names = [r[1] for r in results]  

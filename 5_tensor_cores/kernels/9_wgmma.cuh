@@ -1,3 +1,8 @@
+#include <cuda_runtime.h>
+#include "wgmma/layout_utils.cuh"
+#include <cuda_fp16.h>
+#include "wgmma/wgmma_basic_fp16.cuh"
+
 
 /**
  * @file 9_wgmma.cuh
