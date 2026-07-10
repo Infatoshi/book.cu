@@ -52,33 +52,32 @@ __global__ void quantize_static(float* input, int8_t* output, float static_scale
 }
 
 /**
- * @brief CUDA kernel for dynamic quantization from FP32 to INT8.
+ * @brief Pass 1 of dynamic quantization: reduce the tensor to one max(abs) value.
  *
- * This kernel first computes a scaling factor dynamically for the input batch and then
- * uses it to quantize the data. The scale is `max(abs(input)) / 127.0`.
- * The max value is found via a parallel reduction within the CUDA block.
+ * Each block reduces its slice in shared memory, then thread 0 folds the block
+ * maximum into a single global maximum with an atomic. There is no atomicMax
+ * for floats, but for non-negative floats the raw bit patterns compare in the
+ * same order as the values, so atomicMax on the bits is exact.
  *
- * Note: This implementation assumes the entire tensor fits within a single block's
- * processing capability for the reduction. A multi-block version would require a
- * more complex, two-level reduction.
+ * The result is ONE stored value for the whole tensor. That is the point:
+ * a scale you do not store is a scale you cannot dequantize with later.
  *
  * @param input Pointer to the input FP32 tensor on the device.
- * @param output Pointer to the output INT8 tensor on the device.
+ * @param max_abs_bits Pointer to a single unsigned int, initialized to 0,
+ *                     holding the bit pattern of the running max(abs).
  * @param size The number of elements in the tensor.
  */
-__global__ void quantize_dynamic(float* input, int8_t* output, int size) {
+__global__ void reduce_absmax(const float* input, unsigned int* max_abs_bits, int size) {
     extern __shared__ float sdata[];
 
     int tid = threadIdx.x;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    // --- Part 1: Dynamic Scale Calculation (Intra-Block Reduction) ---
     // Each thread loads the absolute value of one element into shared memory.
-    float val = (idx < size) ? fabsf(input[idx]) : 0.0f;
-    sdata[tid] = val;
+    sdata[tid] = (idx < size) ? fabsf(input[idx]) : 0.0f;
     __syncthreads();
 
-    // Perform a parallel reduction to find the maximum absolute value in the block.
+    // Parallel reduction to find the maximum absolute value in this block.
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
         if (tid < s) {
             sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
@@ -86,15 +85,9 @@ __global__ void quantize_dynamic(float* input, int8_t* output, int size) {
         __syncthreads();
     }
 
-    // The first thread calculates the dynamic scale for this batch.
-    float dynamic_scale = sdata[0] / 127.0f;
-
-    // --- Part 2: Quantization using the Dynamic Scale ---
-    if (idx < size) {
-        // All threads use the same dynamic_scale computed for this block.
-        float scaled = input[idx] / dynamic_scale;
-        scaled = fmaxf(fminf(scaled, 127.0f), -127.0f);
-        output[idx] = (int8_t)roundf(scaled);
+    // Fold this block's maximum into the global maximum.
+    if (tid == 0) {
+        atomicMax(max_abs_bits, __float_as_uint(sdata[0]));
     }
 }
 
@@ -114,6 +107,15 @@ __global__ void dequantize(int8_t* input, float* output, float scale, int size) 
     if (idx >= size) return;
 
     output[idx] = (float)input[idx] * scale;
+}
+
+/**
+ * @brief Host-side reinterpretation of a float's bit pattern (inverse of __float_as_uint).
+ */
+static float uint_bits_to_float(unsigned int u) {
+    float f;
+    memcpy(&f, &u, sizeof(f));
+    return f;
 }
 
 /**
@@ -195,19 +197,25 @@ int main() {
         quantize_static<<<BLOCKS, THREADS>>>(d_input, d_static_quantized, static_scale, BATCH_SIZE);
         dequantize<<<BLOCKS, THREADS>>>(d_static_quantized, d_static_output, static_scale, BATCH_SIZE);
 
-        // --- Dynamic Quantization Path ---
-        // The dynamic quantization kernel computes its own scale internally.
-        quantize_dynamic<<<BLOCKS, THREADS, THREADS * sizeof(float)>>>(d_input, d_dynamic_quantized, BATCH_SIZE);
+        // --- Dynamic Quantization Path (two passes) ---
+        // Pass 1: reduce the batch to one stored max(abs) value.
+        unsigned int* d_max_bits;
+        cudaMalloc(&d_max_bits, sizeof(unsigned int));
+        cudaMemset(d_max_bits, 0, sizeof(unsigned int));
+        reduce_absmax<<<BLOCKS, THREADS, THREADS * sizeof(float)>>>(d_input, d_max_bits, BATCH_SIZE);
 
-        // For dequantization, we need to know the scale that was computed dynamically.
-        // Here, we re-compute it on the CPU for simplicity. In a real application,
-        // the dynamic scale would be an output of the quantization kernel/step.
-        float dynamic_max_abs = 0.0f;
-        for (int i = 0; i < BATCH_SIZE; ++i) {
-            dynamic_max_abs = fmaxf(dynamic_max_abs, fabsf(h_input[i]));
-        }
-        float dynamic_scale = dynamic_max_abs / 127.0f;
+        // The stored max comes back to the host and becomes the batch's scale.
+        // Guard against an all-zero batch: a zero scale would divide by zero.
+        unsigned int h_max_bits;
+        cudaMemcpy(&h_max_bits, d_max_bits, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        float dynamic_max_abs = uint_bits_to_float(h_max_bits);
+        float dynamic_scale = (dynamic_max_abs > 0.0f) ? dynamic_max_abs / 127.0f : 1.0f;
+
+        // Pass 2: apply the stored scale. Note this is the SAME kernel as the
+        // static path; dynamic vs static only differs in where the scale came from.
+        quantize_static<<<BLOCKS, THREADS>>>(d_input, d_dynamic_quantized, dynamic_scale, BATCH_SIZE);
         dequantize<<<BLOCKS, THREADS>>>(d_dynamic_quantized, d_dynamic_output, dynamic_scale, BATCH_SIZE);
+        cudaFree(d_max_bits);
 
         cudaDeviceSynchronize();
 
