@@ -25,7 +25,7 @@
 #include "cute/tensor.hpp"
 #include "cutlass/util/packed_stride.hpp"
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
-#include "cutlass/gemm/kernel/gemm_universal.h"
+#include "cutlass/gemm/kernel/gemm_universal.hpp"
 #include "cutlass/gemm/collective/collective_builder.hpp"
 #include "cutlass/epilogue/collective/collective_builder.hpp"
 

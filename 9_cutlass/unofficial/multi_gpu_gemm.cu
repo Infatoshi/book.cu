@@ -28,10 +28,11 @@
 
 #include "cutlass/cutlass.h"
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
-#include "cutlass/gemm/kernel/gemm_universal.h"
-#include "cutlass/gemm/collective/collective_builder.h"
-#include "cutlass/epilogue/collective/collective_builder.h"
-#include "cutlass/epilogue/fusion/linear_combination.h"
+#include "cutlass/gemm/kernel/gemm_universal.hpp"
+#include "cutlass/gemm/collective/collective_builder.hpp"
+#include "cutlass/epilogue/collective/collective_builder.hpp"
+#include "cutlass/epilogue/fusion/operations.hpp"
+#include "cutlass/util/packed_stride.hpp"
 #include "cutlass/util/device_memory.h"
 #include "cutlass/util/host_tensor.h"
 #include "cutlass/util/reference/host/tensor_fill.h"
@@ -111,7 +112,7 @@ using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 #define NCCL_CHECK(call) \
     do { \
         ncclResult_t err = call; \
-        if (err != ncclSuccess) {
+        if (err != ncclSuccess) { \
             std::cerr << "NCCL error at " << __FILE__ << ":" << __LINE__ << " - " \
                       << ncclGetErrorString(err) << std::endl; \
             exit(1); \
