@@ -1,16 +1,15 @@
-# Chapter 5: Tensor Core Programming
+# Chapter 7: Tensor Core Programming
 
 This chapter covers tensor core programming, moving beyond manual CUDA core optimizations to hardware-accelerated matrix operations.
 
 ## Overview
 
-After optimizing GEMM with CUDA cores in Chapter 4 (kernels 0-7), this chapter introduces **tensor cores** - specialized hardware units designed specifically for matrix multiply-accumulate operations.
+After optimizing GEMM with CUDA cores in chapter 6 (`4_optim/gemm`, kernels 0-6), this chapter introduces **tensor cores** - specialized hardware units designed specifically for matrix multiply-accumulate operations.
 
 ## Structure
 
 ```
 5_tensor_cores/
-└── gemm/
     ├── kernels/
     │   ├── 7_cublas_tc.cuh                 # cuBLAS with Tensor Cores enabled
     │   ├── 8_wmma.cuh                      # WMMA (Warp Matrix Multiply Accumulate)
@@ -94,12 +93,12 @@ After optimizing GEMM with CUDA cores in Chapter 4 (kernels 0-7), this chapter i
 
 ## Building and Running
 
-The tensor core kernels follow the same structure as the CUDA core kernels in Chapter 4:
+The tensor core kernels follow the same structure as the CUDA core kernels in chapter 6:
 
 ```bash
-cd 5_tensor_cores/gemm
+cd 5_tensor_cores
 make
-python main.py
+uv run main.py
 ```
 
 ## Hardware Requirements
@@ -111,7 +110,7 @@ python main.py
 If you don't have the required hardware:
 - Cloud options: Lambda Labs, CoreWeave, vast.ai
 - Understand conceptually - the code teaches the programming model
-- Chapter 9 (CUTLASS) will show library-based approach for newer hardware
+- Chapter 11 (CUTLASS) shows library-based approach for newer hardware
 
 ## Learning Path
 
@@ -119,18 +118,18 @@ If you don't have the required hardware:
 2. Progress to kernel 8 (WMMA) - learn manual tensor core programming
 3. Advance to kernel 9 (WGMMA) - modern asynchronous programming
 4. Study kernels 10-12 to understand optimization progression
-5. Compare with Chapter 4's manual CUDA core optimizations
-6. Prepare for Chapter 6 (Flash Attention) - fused tensor core operations
-7. Look ahead to Chapter 9 (CUTLASS) - production-ready tensor core programming
+5. Compare with chapter 6's manual CUDA core optimizations
+6. Prepare for chapter 8 (Flash Attention) - fused tensor core operations
+7. Look ahead to chapter 11 (CUTLASS) - production-ready tensor core programming
 
 ## Next Steps
 
-- **Chapter 6 (Flash Attention):** Shows how to fuse multiple tensor core operations
-- **Chapter 9 (CUTLASS):** Professional library for tensor core programming on Hopper (FP8) and Blackwell (FP4)
+- **Chapter 8 (Flash Attention):** Shows how to fuse multiple tensor core operations
+- **Chapter 11 (CUTLASS):** Professional library for tensor core programming on Hopper (FP8) and Blackwell (FP4)
 
 ## Notes
 
 - MMA (PTX-level, Volta) is covered conceptually but not implemented (complexity vs. WMMA)
-- TCGen05 (Blackwell FP4) is covered in Chapter 9 with CUTLASS
+- TCGen05 (Blackwell FP4) is covered in chapter 11 with CUTLASS
 - Focus here is on understanding the programming model with minimal abstraction
 

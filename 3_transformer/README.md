@@ -5,19 +5,17 @@ A minimal character-level GPT implementation that demonstrates integrating custo
 ## 🏗️ Project Structure
 
 ```
-naive.cu/
+3_transformer/
 ├── csrc/              # C++ source files and CUDA kernels
 │   ├── training/      # Training C++ bindings and kernels
 │   └── inference/     # Inference C++ bindings and kernels
 ├── wrapper/           # Python wrappers for custom operations
 │   ├── training/      # Training operation wrappers
 │   └── inference/     # Inference operation wrappers
-├── docs/              # Documentation and debugging guides
 ├── train.py           # Character-level transformer training
 ├── inference.py       # Transformer inference with dense/MoE
 ├── setup.py           # Combined build configuration
-├── README.md          # This file
-└── LICENSE
+└── README.md          # This file
 ```
 
 ## 📚 Components

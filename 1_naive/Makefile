@@ -4,8 +4,7 @@
 # Compiler
 NVCC = nvcc
 
-OUT_DIR = out
-OUTPUT_FILE = -o $(OUT_DIR)/$@
+OUTPUT_FILE = -o $@
 
 # Compiler flags
 NVCC_FLAGS = -O2 -I.
@@ -17,8 +16,6 @@ TARGETS = vector_add matrix_add transpose gemm softmax conv1d conv2d maxpool2d
 all: pre-build $(TARGETS)
 
 pre-build:
-	@echo "pre build"
-	mkdir -p $(OUT_DIR)
 
 # Element-wise operations
 vector_add: pre-build elementwise/vector_add.cu common.h

@@ -725,14 +725,14 @@ int main(int argc, char** argv) {
     
     // --- Performance Analysis ---
     
+    // Both runs use the same GPUs, so this is the gain from overlapping
+    // stages, not a speedup over a single GPU.
     double speedup = throughput_stream / throughput_naive;
-    double efficiency = (speedup / num_gpus) * 100.0;
     
     printf("╔═══════════════════════════════════════════════════════════════╗\n");
     printf("║                    Performance Summary                       ║\n");
     printf("╠═══════════════════════════════════════════════════════════════╣\n");
-    printf("║  Speedup:     %.2fx                                           \n", speedup);
-    printf("║  Efficiency:  %.1f%% (%.2fx / %d GPUs)                        \n", efficiency, speedup, num_gpus);
+    printf("║  Speedup:     %.2fx (vs. naive pipeline)                      \n", speedup);
     printf("║  Time Saved:  %.1f%%                                          \n", (1.0 - time_stream/time_naive) * 100.0);
     printf("╚═══════════════════════════════════════════════════════════════╝\n\n");
     

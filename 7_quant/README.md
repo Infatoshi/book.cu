@@ -1,4 +1,4 @@
-# Chapter 8: Quantization - Individual CUDA Examples
+# Chapter 9: Quantization - Individual CUDA Examples
 
 This chapter demonstrates **9 fundamental quantization concepts** through standalone CUDA programs. Each `.cu` file is a complete, self-contained example showing one quantization technique with accuracy validation.
 

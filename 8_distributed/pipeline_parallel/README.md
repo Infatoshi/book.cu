@@ -14,8 +14,7 @@ A comprehensive demonstration of **pipeline parallelism** in CUDA, showing how C
 
 ```
 Naive Sequential:    167,000 samples/sec  (baseline)
-Pipelined Streams:   698,000 samples/sec  (4.17x faster!)
-Efficiency:          104.2% (near-perfect scaling)
+Pipelined Streams:   698,000 samples/sec  (4.17x vs. naive, same 4 GPUs)
 ```
 
 ## 🚀 Quick Start
@@ -67,8 +66,7 @@ Configuration:
 ╔═══════════════════════════════════════════════════════════════╗
 ║                    Performance Summary                       ║
 ╠═══════════════════════════════════════════════════════════════╣
-║  Speedup:     4.17x                                           
-║  Efficiency:  104.2% (4.17x / 4 GPUs)                        
+║  Speedup:     4.17x (vs. naive pipeline)                      
 ║  Time Saved:  76.0%                                          
 ╚═══════════════════════════════════════════════════════════════╝
 
@@ -150,20 +148,6 @@ for (int b = 0; b < NUM_BATCHES; b++) {
 - Multiple batches in flight simultaneously
 - ~95% GPU utilization with 4 GPUs
 
-## 📊 Performance Scaling
-
-| GPUs | Naive (samples/s) | Streams (samples/s) | Speedup | Efficiency |
-|------|-------------------|---------------------|---------|------------|
-| 1    | 601,000           | 1,285,000           | 2.14x   | 214%       |
-| 2    | 323,000           | 1,010,000           | 3.13x   | 157%       |
-| 4    | 167,000           | 698,000             | 4.17x   | 104%       |
-| 8    | 84,000            | 279,000             | 3.32x   | 42%        |
-
-**Key Insights:**
-- **1-4 GPUs:** Near-linear scaling with streams
-- **8 GPUs:** Communication overhead reduces efficiency
-- **Naive version:** Doesn't scale (throughput decreases!)
-- **Stream version:** Consistent high throughput
 
 ## 🔬 Technical Details
 
@@ -359,16 +343,7 @@ pipeline.cu (25KB, 650 lines)
 
 ### One Number to Remember
 
-> **4.17x speedup** with 4 GPUs using streams vs sequential processing
-
-### Efficiency Formula
-
-```
-Efficiency = (Actual Speedup / Num GPUs) × 100%
-
-4 GPUs: 4.17x / 4 = 104.2% efficiency
-        (>100% because streams also overlap H2D/D2H transfers!)
-```
+> **4.17x** higher throughput on the same 4 GPUs from overlapping stages with streams
 
 ## 📚 Further Reading
 

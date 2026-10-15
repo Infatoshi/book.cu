@@ -1,6 +1,6 @@
 # CUDA Naive Neural Network Operations
 
-This repository contains **naive but correct** CUDA implementations of the fundamental operations in deep learning, extracted from **Chapter 03: Building the Core Operations from Scratch** of the CUDA Programming Book.
+This repository contains **naive but correct** CUDA implementations of the fundamental operations in deep learning, extracted from **chapter 3: Building the Core Operations from Scratch** of the CUDA Programming Book.
 
 ## Overview
 

@@ -1,7 +1,7 @@
 # MNIST Neural Network Examples
 
 Progressive implementations of a two-layer MLP for MNIST digit classification,
-from **Chapter 04** of the book. The same network (input 784 -> hidden 256 ->
+from **chapter 4** of the book. The same network (input 784 -> hidden 256 ->
 output 10) is rebuilt in Python, C, and CUDA so you can compare the host and
 device code directly.
 

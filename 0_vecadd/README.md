@@ -1,6 +1,6 @@
 # CUDA Vector Addition Examples
 
-This repository contains CUDA vector addition examples from **Chapter 02: GPU Memory Management and Kernel Launch** of the CUDA Programming Book.
+This repository contains CUDA vector addition examples from **chapter 2** of *CUDA for LLMs*.
 
 ## Overview
 

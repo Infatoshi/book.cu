@@ -91,7 +91,8 @@ using namespace cute;
 //
 
 // A matrix (left-hand side) configuration.
-// `nv_float4_t` is a packed type holding two FP4 values. `float_e2m1_t` is the E2M1 FP4 format.
+// `nv_float4_t` marks the operand as NVFP4: `float_e2m1_t` (E2M1 FP4) values with a
+// UE4M3 scale factor per 16-element block, applied by the block-scaled tensor cores.
 using ElementA = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
 using LayoutATag = cutlass::layout::RowMajor;
 constexpr int AlignmentA = 32; // Alignment in bytes for efficient memory access.
