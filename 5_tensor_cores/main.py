@@ -16,7 +16,16 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 
-os.environ['TORCH_CUDA_ARCH_LIST'] = '9.0a'
+# K9-K12 (WGMMA/TMA) only run on Hopper (sm_90a). On other GPUs, build K7 (cuBLAS) and
+# K8 (WMMA, sm_70+) for the local architecture and skip the WGMMA kernels.
+MAJOR, MINOR = torch.cuda.get_device_capability()
+HAS_WGMMA = (MAJOR, MINOR) == (9, 0)
+if HAS_WGMMA:
+    os.environ['TORCH_CUDA_ARCH_LIST'] = '9.0a'
+    ARCH_FLAGS = ['-gencode=arch=compute_90a,code=sm_90a']
+else:
+    os.environ['TORCH_CUDA_ARCH_LIST'] = f'{MAJOR}.{MINOR}'
+    ARCH_FLAGS = [f'-gencode=arch=compute_{MAJOR}{MINOR},code=sm_{MAJOR}{MINOR}', '-DBOOKCU_NO_WGMMA']
 
 from torch.utils.cpp_extension import load
 
@@ -28,7 +37,7 @@ print("\n[1/3] Compiling tensor core kernels...")
 kernels = load(
     name='tensor_core_gemm',
     sources=['wrapper.cpp', 'kernels/all_kernels.cu'],
-    extra_cuda_cflags=['-std=c++20', '-gencode=arch=compute_90a,code=sm_90a', '-O3'],
+    extra_cuda_cflags=['-std=c++20', *ARCH_FLAGS, '-O3'],
     extra_ldflags=['-lcublas', '-lcuda'],
     verbose=False,
 )
@@ -60,6 +69,9 @@ KERNELS = [
     ("kernel_11_raw", kernels.kernel_11_raw, colmajor_ptrs, True, "WGMMA Async Loads"),
     ("kernel_12_raw", kernels.kernel_12_raw, colmajor_ptrs, True, "WGMMA Max Tiles"),
 ]
+if not HAS_WGMMA:
+    print(f"Note: sm_{MAJOR}{MINOR} GPU; K9-K12 (WGMMA) need Hopper (sm_90a) and are skipped.")
+    KERNELS = [k for k in KERNELS if k[0] in ("kernel_7_raw", "kernel_8_raw")]
 
 def benchmark_kernel(func, args, uses_col_layout=False):
     if uses_col_layout:
