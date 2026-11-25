@@ -46,6 +46,8 @@ class EmbeddingFunction(Function):
         Returns:
             Output embeddings of shape (batch_size, seq_len, n_embd), CUDA tensor
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        weight, indices = weight.contiguous(), indices.contiguous()
         # Save input tensors for backward pass
         ctx.save_for_backward(weight, indices)
 
@@ -80,6 +82,8 @@ class EmbeddingFunction(Function):
             - grad_weight: Gradient w.r.t. embedding weights, shape (vocab_size, n_embd)
             - None: No gradient for indices (they are discrete)
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_out = grad_out.contiguous()
         # Retrieve saved tensors from forward pass
         weight, indices = ctx.saved_tensors
 

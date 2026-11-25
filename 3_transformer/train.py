@@ -266,7 +266,7 @@ class CustomLinear(nn.Module):
 
         if x.dim() == 2:
             x_contiguous = x.contiguous()
-            weight_t_contiguous = self.weight.t()
+            weight_t_contiguous = self.weight.t().contiguous()
             out = self.matmul(x_contiguous, weight_t_contiguous)
 
             if self.bias is not None:
@@ -276,7 +276,7 @@ class CustomLinear(nn.Module):
             x_reshaped = x.contiguous().view(-1, x.size(-1))  
 
             x_reshaped_contiguous = x_reshaped.contiguous()
-            weight_t_contiguous = self.weight.t()
+            weight_t_contiguous = self.weight.t().contiguous()
 
             out = self.matmul(x_reshaped_contiguous, weight_t_contiguous)
 

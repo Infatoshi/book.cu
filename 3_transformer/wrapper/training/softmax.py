@@ -45,6 +45,8 @@ class SoftmaxFunction(Function):
             Output probabilities tensor, same shape as input, CUDA tensor
             All values are in [0, 1] and sum to 1 along the last dimension
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        x = x.contiguous()
         # Save input for backward pass (we'll recompute softmax in backward)
         ctx.save_for_backward(x)
 
@@ -76,6 +78,8 @@ class SoftmaxFunction(Function):
         Returns:
             Gradient with respect to input logits x, same shape as input
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_out = grad_out.contiguous()
         # Retrieve saved tensor from forward pass
         x, = ctx.saved_tensors
 

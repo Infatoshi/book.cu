@@ -51,6 +51,8 @@ class LayerNormFunction(Function):
         Returns:
             Normalized output tensor, same shape as input x, CUDA tensor
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        x, gamma, beta = x.contiguous(), gamma.contiguous(), beta.contiguous()
         # Allocate output and statistics tensors
         out = torch.empty_like(x)
         mean = torch.empty(x.size(0), x.size(1), dtype=x.dtype, device=x.device)
@@ -87,6 +89,8 @@ class LayerNormFunction(Function):
             - grad_beta: Gradient w.r.t. beta, shape (n_embd,)
             - None: No gradient for eps parameter
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_out = grad_out.contiguous()
         # Retrieve saved tensors from forward pass
         x, gamma, beta, mean, var = ctx.saved_tensors
         eps = ctx.eps

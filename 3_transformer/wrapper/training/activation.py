@@ -42,6 +42,8 @@ class GELUFunction(Function):
         Returns:
             Output tensor with GELU activation applied, same shape as input, CUDA tensor
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        x = x.contiguous()
         # Save input tensor for backward pass
         ctx.save_for_backward(x)
 
@@ -69,6 +71,8 @@ class GELUFunction(Function):
         Returns:
             Gradient with respect to input x, same shape as input
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_out = grad_out.contiguous()
         # Retrieve saved tensor from forward pass
         x, = ctx.saved_tensors
 

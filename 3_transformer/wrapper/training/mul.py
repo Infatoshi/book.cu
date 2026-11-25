@@ -41,6 +41,8 @@ class MulFunction(Function):
         Returns:
             Output tensor c = a * b, same shape as inputs, CUDA tensor
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        a, b = a.contiguous(), b.contiguous()
         # Save input tensors for backward pass
         ctx.save_for_backward(a, b)
 
@@ -71,6 +73,8 @@ class MulFunction(Function):
             - grad_a: Gradient w.r.t. input a
             - grad_b: Gradient w.r.t. input b
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_out = grad_out.contiguous()
         # Retrieve saved tensors from forward pass
         a, b = ctx.saved_tensors
 
