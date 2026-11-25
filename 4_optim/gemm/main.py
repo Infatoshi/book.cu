@@ -8,19 +8,21 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 
-os.environ['TORCH_CUDA_ARCH_LIST'] = '9.0a'
+# These are plain CUDA-core kernels (no Hopper features), so build for whatever GPU is present.
+MAJOR, MINOR = torch.cuda.get_device_capability()
+os.environ['TORCH_CUDA_ARCH_LIST'] = f'{MAJOR}.{MINOR}'
 
 from torch.utils.cpp_extension import load
 
 print("=" * 80)
-print("Progressive Hopper kernels – kernel-only timing (raw entry points)")
+print("Progressive CUDA-core GEMM kernels – kernel-only timing (raw entry points)")
 print("=" * 80)
 
 print("\n[1/3] Compiling extension...")
 kernels = load(
     name='gemm_kernels_raw_bench',
     sources=['wrapper.cpp', 'kernels/all_kernels.cu'],
-    extra_cuda_cflags=['-std=c++20', '-gencode=arch=compute_86,code=sm_86', '-O3'],
+    extra_cuda_cflags=['-std=c++20', f'-gencode=arch=compute_{MAJOR}{MINOR},code=sm_{MAJOR}{MINOR}', '-O3'],
     extra_ldflags=['-lcublas', '-lcuda'],
     verbose=False,
 )

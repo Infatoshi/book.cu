@@ -39,7 +39,9 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List
 import time
 
-os.environ["TORCH_CUDA_ARCH_LIST"] = "9.0"
+# Both kernels use WMMA (sm_70+), so build for whatever GPU is present.
+_major, _minor = torch.cuda.get_device_capability()
+os.environ["TORCH_CUDA_ARCH_LIST"] = f"{_major}.{_minor}"
 
 @dataclass
 class KernelConfig:
@@ -110,6 +112,8 @@ def load_kernel(config: KernelConfig):
         A loaded Python module containing the bound CUDA function.
     """
     print(f"Loading {config.name}...")
+    # load() needs the build directory to exist; it is not checked into the repo
+    os.makedirs(config.build_dir, exist_ok=True)
     return load(
         name=config.name,
         sources=config.sources,
@@ -412,10 +416,18 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    compare_kernels(
+    results = compare_kernels(
         batch_size=args.batch_size,
         n_heads=args.n_heads,
         seq_len=args.seq_len,
         head_dim=args.head_dim,
         kernels_to_test=args.kernels
     )
+
+    # Exit non-zero if any requested kernel failed to build/run or produced a wrong result
+    requested = [k for k in (args.kernels or list(KERNELS)) if k in KERNELS]
+    passed = {r.kernel_name for r in results if r.correctness}
+    failed = [k for k in requested if k not in passed]
+    if failed:
+        print(f"FAILED: {', '.join(failed)}")
+        raise SystemExit(1)
