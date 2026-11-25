@@ -4,7 +4,9 @@
 # Compiler
 NVCC = nvcc
 
-OUTPUT_FILE = -o $@
+# Executables go to bin/: several targets (transpose, gemm, softmax, ...) share their name
+# with a source directory, so building them in place failed with "Is a directory".
+BIN = bin
 
 # Compiler flags
 NVCC_FLAGS = -O2 -I.
@@ -12,96 +14,102 @@ NVCC_FLAGS = -O2 -I.
 # All targets
 TARGETS = vector_add matrix_add transpose gemm softmax conv1d conv2d maxpool2d
 
-# Default target
-all: pre-build $(TARGETS)
+.PHONY: all run clean help $(TARGETS) $(addprefix run_,$(TARGETS))
 
-pre-build:
+# Default target
+all: $(TARGETS)
+
+# `make gemm` etc. still work and build bin/gemm
+$(TARGETS): %: $(BIN)/%
+
+$(BIN):
+	mkdir -p $(BIN)
 
 # Element-wise operations
-vector_add: pre-build elementwise/vector_add.cu common.h
-	$(NVCC) $(NVCC_FLAGS) elementwise/vector_add.cu $(OUTPUT_FILE)
+$(BIN)/vector_add: elementwise/vector_add.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) elementwise/vector_add.cu -o $@
 
-matrix_add: pre-build elementwise/matrix_add.cu common.h
-	$(NVCC) $(NVCC_FLAGS) elementwise/matrix_add.cu $(OUTPUT_FILE)
+$(BIN)/matrix_add: elementwise/matrix_add.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) elementwise/matrix_add.cu -o $@
 
 # Matrix operations
-transpose: pre-build transpose/transpose.cu common.h
-	$(NVCC) $(NVCC_FLAGS) transpose/transpose.cu $(OUTPUT_FILE)
+$(BIN)/transpose: transpose/transpose.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) transpose/transpose.cu -o $@
 
-gemm: pre-build gemm/gemm.cu common.h
-	$(NVCC) $(NVCC_FLAGS) gemm/gemm.cu $(OUTPUT_FILE)
+$(BIN)/gemm: gemm/gemm.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) gemm/gemm.cu -o $@
 
 # Neural network operations
-softmax: pre-build softmax/softmax.cu common.h
-	$(NVCC) $(NVCC_FLAGS) softmax/softmax.cu $(OUTPUT_FILE)
+$(BIN)/softmax: softmax/softmax.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) softmax/softmax.cu -o $@
 
-conv1d: pre-build conv1d/conv1d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) conv1d/conv1d.cu $(OUTPUT_FILE)
+$(BIN)/conv1d: conv1d/conv1d.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) conv1d/conv1d.cu -o $@
 
-conv2d: pre-build conv2d/conv2d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) conv2d/conv2d.cu $(OUTPUT_FILE)
+$(BIN)/conv2d: conv2d/conv2d.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) conv2d/conv2d.cu -o $@
 
-maxpool2d: pre-build maxpool2d/maxpool2d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) maxpool2d/maxpool2d.cu $(OUTPUT_FILE)
+$(BIN)/maxpool2d: maxpool2d/maxpool2d.cu common.h | $(BIN)
+	$(NVCC) $(NVCC_FLAGS) maxpool2d/maxpool2d.cu -o $@
 
 # Build and run all examples
 run: all
 	@echo "=== Running All Naive CUDA Examples ==="
 	@echo ""
 	@echo "=== Vector Addition ==="
-	./vector_add
+	./$(BIN)/vector_add
 	@echo ""
 	@echo "=== Matrix Addition ==="
-	./matrix_add
+	./$(BIN)/matrix_add
 	@echo ""
 	@echo "=== Matrix Transpose ==="
-	./transpose
+	./$(BIN)/transpose
 	@echo ""
 	@echo "=== GEMM (Matrix Multiplication) ==="
-	./gemm
+	./$(BIN)/gemm
 	@echo ""
 	@echo "=== Softmax ==="
-	./softmax
+	./$(BIN)/softmax
 	@echo ""
 	@echo "=== 1D Convolution ==="
-	./conv1d
+	./$(BIN)/conv1d
 	@echo ""
 	@echo "=== 2D Convolution ==="
-	./conv2d
+	./$(BIN)/conv2d
 	@echo ""
 	@echo "=== 2D Max Pooling ==="
-	./maxpool2d
+	./$(BIN)/maxpool2d
 	@echo ""
 	@echo "=== All examples completed! ==="
 
 # Clean build artifacts
 clean:
-	rm -f $(TARGETS)
+	rm -rf $(BIN)
 
 # Individual run targets
 run_vector_add: vector_add
-	./vector_add
+	./$(BIN)/vector_add
 
 run_matrix_add: matrix_add
-	./matrix_add
+	./$(BIN)/matrix_add
 
 run_transpose: transpose
-	./transpose
+	./$(BIN)/transpose
 
 run_gemm: gemm
-	./gemm
+	./$(BIN)/gemm
 
 run_softmax: softmax
-	./softmax
+	./$(BIN)/softmax
 
 run_conv1d: conv1d
-	./conv1d
+	./$(BIN)/conv1d
 
 run_conv2d: conv2d
-	./conv2d
+	./$(BIN)/conv2d
 
 run_maxpool2d: maxpool2d
-	./maxpool2d
+	./$(BIN)/maxpool2d
 
 # Show help
 help:

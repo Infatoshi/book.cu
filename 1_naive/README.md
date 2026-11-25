@@ -62,7 +62,7 @@ make run
 ```bash
 # Build specific operation
 make vector_add
-./vector_add
+./bin/vector_add
 
 # Or use run targets
 make run_gemm

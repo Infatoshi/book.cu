@@ -10,8 +10,8 @@ device code directly.
 | File | Description |
 |------|-------------|
 | `v0.py` | Data preprocessing: downloads MNIST and writes `data/*.bin` |
-| `v1.py` | NumPy reference implementation |
-| `v2.py` | PyTorch implementation |
+| `v1.py` | PyTorch implementation (the reference the other versions are checked against) |
+| `v2.py` | NumPy implementation |
 | `v3.c` | Single-threaded C implementation |
 | `v4.cu` | Custom CUDA kernels |
 | `v5.cu` | CUDA with cuBLAS for the matrix multiplications |
@@ -53,8 +53,8 @@ nvcc -O3 v5.cu -o mnist_cublas -lcublas
 The Python versions run directly:
 
 ```bash
-python v1.py   # NumPy
-python v2.py   # PyTorch
+python v1.py   # PyTorch
+python v2.py   # NumPy
 ```
 
 ## Hyperparameters
