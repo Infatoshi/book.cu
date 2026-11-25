@@ -42,8 +42,12 @@ class AddFunction(Function):
         Returns:
             Output tensor c = a + b (after broadcasting), CUDA tensor
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        a, b = a.contiguous(), b.contiguous()
         # Handle tensor broadcasting (PyTorch's automatic broadcasting)
         a_broadcast, b_broadcast = torch.broadcast_tensors(a, b)
+        # broadcast_tensors returns stride-0 expanded views; materialize them for the kernel
+        a_broadcast, b_broadcast = a_broadcast.contiguous(), b_broadcast.contiguous()
 
         # Save original tensors and broadcast shapes for backward pass
         ctx.save_for_backward(a, b)
@@ -80,6 +84,8 @@ class AddFunction(Function):
             - grad_a: Gradient w.r.t. input a (summed if broadcasting occurred)
             - grad_b: Gradient w.r.t. input b (summed if broadcasting occurred)
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_out = grad_out.contiguous()
         # Retrieve saved tensors from forward pass
         a, b = ctx.saved_tensors
         a_broadcast_shape = ctx.a_broadcast_shape

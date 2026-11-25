@@ -45,6 +45,8 @@ class BatchedMatMulFunction(Function):
         Returns:
             Output matrix C of shape (batch_size, M, N), CUDA tensor
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        A, B = A.contiguous(), B.contiguous()
         # Save input tensors for backward pass
         ctx.save_for_backward(A, B)
 
@@ -79,6 +81,8 @@ class BatchedMatMulFunction(Function):
             - grad_A: Gradient w.r.t. A, shape (batch_size, M, K)
             - grad_B: Gradient w.r.t. B, shape (batch_size, K, N)
         """
+        # The CUDA kernels index raw pointers as contiguous row-major memory.
+        grad_C = grad_C.contiguous()
         # Retrieve saved tensors from forward pass
         A, B = ctx.saved_tensors
 

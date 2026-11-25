@@ -191,28 +191,31 @@ __global__ void layernorm_bwd_params_kernel(const float* grad_out, const float* 
                                           const float* mean, const float* var,
                                           float* grad_gamma, float* grad_beta,
                                           int batch_size, int seq_len, int n_embd, float eps) {
-    // Each thread processes one embedding dimension across all (batch, sequence) positions
+    // Each block handles one (batch, sequence) position; threads stride over the embedding
+    // dimension so that n_embd larger than blockDim.x (capped at 256) is fully covered
     int batch = blockIdx.x;
     int seq = blockIdx.y;
-    int emb = threadIdx.x;
 
-    if (batch < batch_size && seq < seq_len && emb < n_embd) {
+    if (batch < batch_size && seq < seq_len) {
         int mean_var_idx = batch * seq_len + seq;
-        int tensor_idx = batch * seq_len * n_embd + seq * n_embd + emb;
 
         // Get mean and variance from forward pass
         float mean_val = mean[mean_var_idx];
         float var_val = var[mean_var_idx];
         float inv_std = rsqrtf(var_val + eps);
 
-        // Compute normalized value
-        float normalized = (x[tensor_idx] - mean_val) * inv_std;
+        for (int emb = threadIdx.x; emb < n_embd; emb += blockDim.x) {
+            int tensor_idx = batch * seq_len * n_embd + seq * n_embd + emb;
 
-        // Accumulate gradients using atomic operations
-        // grad_gamma[emb] += grad_out * normalized (accumulated over all batch/seq positions)
-        // grad_beta[emb] += grad_out (accumulated over all batch/seq positions)
-        atomicAdd(&grad_gamma[emb], grad_out[tensor_idx] * normalized);
-        atomicAdd(&grad_beta[emb], grad_out[tensor_idx]);
+            // Compute normalized value
+            float normalized = (x[tensor_idx] - mean_val) * inv_std;
+
+            // Accumulate gradients using atomic operations
+            // grad_gamma[emb] += grad_out * normalized (accumulated over all batch/seq positions)
+            // grad_beta[emb] += grad_out (accumulated over all batch/seq positions)
+            atomicAdd(&grad_gamma[emb], grad_out[tensor_idx] * normalized);
+            atomicAdd(&grad_beta[emb], grad_out[tensor_idx]);
+        }
     }
 }
 
