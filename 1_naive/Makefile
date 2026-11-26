@@ -4,73 +4,58 @@
 # Compiler
 NVCC = nvcc
 
-OUTPUT_FILE = -o $@
-
 # Compiler flags
 NVCC_FLAGS = -O2 -I.
 
-# All targets
-TARGETS = vector_add matrix_add transpose gemm softmax conv1d conv2d maxpool2d
+TARGETS = elementwise/vector_add elementwise/matrix_add transpose/transpose \
+          gemm/gemm softmax/softmax conv1d/conv1d conv2d/conv2d maxpool2d/maxpool2d
 
-# Default target
-all: pre-build $(TARGETS)
+all: $(TARGETS)
 
-pre-build:
+$(TARGETS): %: %.cu common.h
+	$(NVCC) $(NVCC_FLAGS) $< -o $@
 
-# Element-wise operations
-vector_add: pre-build elementwise/vector_add.cu common.h
-	$(NVCC) $(NVCC_FLAGS) elementwise/vector_add.cu $(OUTPUT_FILE)
+# Keep the short names available as command-line targets.
+vector_add: elementwise/vector_add
+matrix_add: elementwise/matrix_add
+transpose: transpose/transpose
+gemm: gemm/gemm
+softmax: softmax/softmax
+conv1d: conv1d/conv1d
+conv2d: conv2d/conv2d
+maxpool2d: maxpool2d/maxpool2d
 
-matrix_add: pre-build elementwise/matrix_add.cu common.h
-	$(NVCC) $(NVCC_FLAGS) elementwise/matrix_add.cu $(OUTPUT_FILE)
-
-# Matrix operations
-transpose: pre-build transpose/transpose.cu common.h
-	$(NVCC) $(NVCC_FLAGS) transpose/transpose.cu $(OUTPUT_FILE)
-
-gemm: pre-build gemm/gemm.cu common.h
-	$(NVCC) $(NVCC_FLAGS) gemm/gemm.cu $(OUTPUT_FILE)
-
-# Neural network operations
-softmax: pre-build softmax/softmax.cu common.h
-	$(NVCC) $(NVCC_FLAGS) softmax/softmax.cu $(OUTPUT_FILE)
-
-conv1d: pre-build conv1d/conv1d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) conv1d/conv1d.cu $(OUTPUT_FILE)
-
-conv2d: pre-build conv2d/conv2d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) conv2d/conv2d.cu $(OUTPUT_FILE)
-
-maxpool2d: pre-build maxpool2d/maxpool2d.cu common.h
-	$(NVCC) $(NVCC_FLAGS) maxpool2d/maxpool2d.cu $(OUTPUT_FILE)
+.PHONY: all run clean help vector_add matrix_add transpose gemm softmax \
+        conv1d conv2d maxpool2d run_vector_add run_matrix_add run_transpose \
+        run_gemm run_softmax run_conv1d run_conv2d run_maxpool2d
 
 # Build and run all examples
 run: all
 	@echo "=== Running All Naive CUDA Examples ==="
 	@echo ""
 	@echo "=== Vector Addition ==="
-	./vector_add
+	./elementwise/vector_add
 	@echo ""
 	@echo "=== Matrix Addition ==="
-	./matrix_add
+	./elementwise/matrix_add
 	@echo ""
 	@echo "=== Matrix Transpose ==="
-	./transpose
+	./transpose/transpose
 	@echo ""
 	@echo "=== GEMM (Matrix Multiplication) ==="
-	./gemm
+	./gemm/gemm
 	@echo ""
 	@echo "=== Softmax ==="
-	./softmax
+	./softmax/softmax
 	@echo ""
 	@echo "=== 1D Convolution ==="
-	./conv1d
+	./conv1d/conv1d
 	@echo ""
 	@echo "=== 2D Convolution ==="
-	./conv2d
+	./conv2d/conv2d
 	@echo ""
 	@echo "=== 2D Max Pooling ==="
-	./maxpool2d
+	./maxpool2d/maxpool2d
 	@echo ""
 	@echo "=== All examples completed! ==="
 
@@ -80,28 +65,28 @@ clean:
 
 # Individual run targets
 run_vector_add: vector_add
-	./vector_add
+	./elementwise/vector_add
 
 run_matrix_add: matrix_add
-	./matrix_add
+	./elementwise/matrix_add
 
 run_transpose: transpose
-	./transpose
+	./transpose/transpose
 
 run_gemm: gemm
-	./gemm
+	./gemm/gemm
 
 run_softmax: softmax
-	./softmax
+	./softmax/softmax
 
 run_conv1d: conv1d
-	./conv1d
+	./conv1d/conv1d
 
 run_conv2d: conv2d
-	./conv2d
+	./conv2d/conv2d
 
 run_maxpool2d: maxpool2d
-	./maxpool2d
+	./maxpool2d/maxpool2d
 
 # Show help
 help:
